@@ -1,5 +1,5 @@
 ---
-title: "ESP_106_Project_Emma_Christian"
+title: "ESP-195_Captstone_Project"
 author: "Christian Seierup"
 date: "2026-02-11"
 output: html_document
@@ -379,69 +379,9 @@ load("data/my_Rdata/gdfs.Rdata")
 
 ### 4.0 Define functions, load Shapefiles
 
-```{r, 4.0.1 TPS Function}
-# 4.0 - Define TPS function
-MyTPS = function(GDF, COL, SHP, GSD){
-
-# This function takes in a dataframe with columns 'x', 'y', and a 
-# column of values to perform a Thin Plate Spline (TPS) regression.
-# It also takes in a shapefile to get the bounds and CRS. It returns
-# A raster of interpolated values with the bounds and CRS of the
-# shapefile.
-# 
-# Inputs: 
-#   GDF: dataframe with columns 'x' and 'y' for coordinates
-#   COL: string of column name in GDF that contains the values
-#           that we want to interpolate for
-#   SHP: SpatVector that sets the bounds for the interpolated raster
-#   GSD: integer of desired Ground Sample Distance in units of the
-#         SHP crs, probably Meters.
-#   
-# Output:
-#   my_tps: SpatRaster of TPS interpolated values with the 
-#           same CRS of SHP
-#   
-# Dependent Packages
-#   fields: for the Tps function
-#   terra: for the interpolate function
-
-  
-  # Project Shapefile
-  SHP = SHP %>% 
-    project("EPSG:3310") # NAD83 CA Teale Albers
-  
-  # Get Projected GDF Coordinates
-  my_coords = as.matrix(GDF[,c("x", "y")]) %>%
-    project("EPSG:4326", "EPSG:3310")
-  
-  # Create my_vals object of measurements
-  my_vals = GDF[COL]
-  
-  
-  # Create Blank Raster to fill in
-  my_rast = rast(ext(SHP) + 10000, crs = crs(SHP),
-                 res=c(GSD, GSD)) # Ground Sample Distance
-                                  # (GSD) in CRS units
-   
-  # Create Tps Object
-  # Tps() takes in a matrix of xy values and a vector of independent values
-  my_tps_mod = Tps(x = my_coords,
-                   Y = my_vals)
-
-  # Interpolate using Tps Object
-  my_tps = interpolate(my_rast, my_tps_mod)
-
-  # Clip Interpolated rasters to basins area
-  my_tps = crop(my_tps, SHP, mask=T)
-
-  # Return clipped raster
-  my_tps
-}
-```
-
 ```{r, 4.0.2 IDW Function}
 # 4.0 - Define IDW function
-MyIDW = function(GDF, COL, SHP, GSD){
+MyIDW = function(GDF, COL, SHP, GSD, NAME){
 
 # This function takes in a dataframe with columns 'x', 'y', and a 
 # column of values to perform a Inverse Distance Weighting (IDW) 
@@ -456,14 +396,12 @@ MyIDW = function(GDF, COL, SHP, GSD){
 #   SHP: SpatVector that sets the bounds for the interpolated raster
 #   GSD: integer of desired Ground Sample Distance in units of the
 #         SHP crs, probably Meters.
+#   NAME: string of what to name the raster layer
 #   
 # Output:
 #   my_idw: SpatRaster of IDW interpolated values with the 
-#           same CRS of SHP
-#   
-# Dependent Packages
-#   gstat: for the gstat function, doing IDW interpolation
-#   terra: for the interpolate function
+#           same CRS of SHP, layer name of NAME
+  
   
   # Project Shapefile
   SHP = SHP %>% 
@@ -494,6 +432,9 @@ MyIDW = function(GDF, COL, SHP, GSD){
   
   # Clip Interpolated rasters to basins area
   my_idw = crop(my_idw, SHP, mask=T)
+  
+  # Rename Raster
+  names(my_idw) = NAME
 
   # Return IDW
   my_idw
@@ -524,31 +465,12 @@ ca_basins = project(ca_basins, "epsg:4326")
 ```{r, 4.1}
 # 4.1.1 - Run TPS interpolation
 # Pre SGMA TPS for GWE
-gwe_pre_tps = MyTPS(GDF = gwe_gdf %>% 
-                      subset(post_SGMA == "Pre_SGMA"),
-                    COL = "slope",
-                    SHP = ca_basins[2],
-                    GSD = 2000)
-
-# Post SGMA TPS for GWE
-gwe_post_tps = MyTPS(GDF = gwe_gdf %>% 
-                       subset(post_SGMA == "Post_SGMA"),
-                     COL = "slope",
-                     SHP = ca_basins[2],
-                     GSD = 2000)
-
-```
-
-```{r, 4.1}
-# 4.1.1 - Run TPS interpolation
-# Pre SGMA TPS for GWE
 gwe_pre_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Pre_SGMA"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "gwe_pre")
 
 # Post SGMA TPS for GWE
 gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
-
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post")
 ```
 
 ### 4.2 IDW for DDW
@@ -558,25 +480,25 @@ gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
 # Pre SGMA IDW for NO3
 no3_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" & 
                                                 chemical == "Nitrate_as_N_MG/L"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "no3_pre")
 
 # Post SGMA IDW for NO3
 no3_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                 chemical == "Nitrate_as_N_MG/L"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "no3_post")
 ```
 
 ```{r, 4.2.2}
 # 4.2.2 - Run IDW for Hexavalent Chromium
 # Pre SGMA IDW for Cr6
-cr_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
+cr6_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
                                                chemical == "Chromium,_Hexavalent_(Cr6)_UG/L"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "cr6_pre")
 
 # Post SGMA IDW for Cr6
-cr_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
+cr6_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                 chemical == "Chromium,_Hexavalent_(Cr6)_UG/L"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "cr6_post")
 ```
 
 ```{r, 4.2.3}
@@ -584,12 +506,12 @@ cr_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
 # Pre SGMA IDW for As
 as_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
                                               chemical == "Arsenic_UG/L"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "as_pre")
 
 # Post SGMA IDW for As
 as_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                chemical == "Arsenic_UG/L"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "as_post")
 ```
 
 
@@ -606,52 +528,52 @@ load("data/my_Rdata/clean_sites.Rdata")
 
 ```{r}
 # Reproject Basins
-basins_gwe = project(basins, "EPSG:3310")
+basins_int = project(basins, "EPSG:3310")
 
 # Run Zonal Stats
-gwe_pre_mean = zonal(gwe_pre_idw, basins_gwe, fun="mean")
+gwe_pre_mean = zonal(gwe_pre_idw, basins_int, fun="mean")
 
-gwe_post_mean = zonal(gwe_post_idw, basins_gwe, fun="mean")
+gwe_post_mean = zonal(gwe_post_idw, basins_int, fun="mean")
 
 # Add Zonal Stats to Dataframe
-values(basins_gwe) = cbind(values(basins_gwe),
+values(basins_int) = cbind(values(basins_int),
                            gwe_pre = gwe_pre_mean$slope_idw.pred,
                            gwe_post = gwe_post_mean$slope_idw.pred)
 
 # Calculate Change in slope
-basins_gwe$gwe_d = basins_gwe$gwe_pre - basins_gwe$gwe_post
+basins_int$gwe_d = basins_int$gwe_pre - basins_int$gwe_post
 ```
 
 ### 5.2 Zonal Stats on DDW Data
 
 ```{r}
 # Reproject Basins
-basins_ddw = project(basins, "EPSG:3310")
+basins_int = project(basins, "EPSG:3310")
 
 # Nitrate Zonal Stats
-no3_pre_mean = zonal(no3_pre_idw, basins_ddw, fun="mean")
-no3_post_mean = zonal(no3_post_idw, basins_ddw, fun="mean")
+no3_pre_mean = zonal(no3_pre_idw, basins_int, fun="mean")
+no3_post_mean = zonal(no3_post_idw, basins_int, fun="mean")
 
 # Chromium Zonal Stats
-cr_pre_mean = zonal(cr_pre_idw, basins_ddw, fun="mean")
-cr_post_mean = zonal(cr_post_idw, basins_ddw, fun="mean")
+cr6_pre_mean = zonal(cr6_pre_idw, basins_int, fun="mean")
+cr6_post_mean = zonal(cr6_post_idw, basins_int, fun="mean")
 
 # Arsenic Zonal Stats
-as_pre_mean = zonal(as_pre_idw, basins_ddw, fun="mean")
-as_post_mean = zonal(as_post_idw, basins_ddw, fun="mean")
+as_pre_mean = zonal(as_pre_idw, basins_int, fun="mean")
+as_post_mean = zonal(as_post_idw, basins_int, fun="mean")
 
-values(basins_ddw) = cbind(values(basins_ddw),
+values(basins_int) = cbind(values(basins_int),
                            no3_pre = no3_pre_mean$slope_idw.pred,
                            no3_post = no3_post_mean$slope_idw.pred,
-                           cr_pre = cr_pre_mean$slope_idw.pred,
-                           cr_post = cr_post_mean$slope_idw.pred,
+                           cr6_pre = cr6_pre_mean$slope_idw.pred,
+                           cr6_post = cr6_post_mean$slope_idw.pred,
                            as_pre = as_pre_mean$slope_idw.pred,
                            as_post = as_post_mean$slope_idw.pred)
 
 # Calculate change in slope
-basins_ddw$no3_d = basins_ddw$no3_post - basins_ddw$no3_pre
-basins_ddw$cr_d = basins_ddw$cr_post - basins_ddw$cr_pre
-basins_ddw$as_d = basins_ddw$as_post - basins_ddw$as_pre
+basins_int$no3_d = basins_int$no3_post - basins_int$no3_pre
+basins_int$cr6_d = basins_int$cr6_post - basins_int$cr6_pre
+basins_int$as_d = basins_int$as_post - basins_int$as_pre
 ```
 
 
@@ -672,7 +594,7 @@ gwe_col <- c('red', "#FF7070", "#FF8282", "#FFD9D9", 'white', "#B3DBFF", "#69B8F
 gwe_breaks = c(-20, -10, -5, -2, -.1, .1, 2, 5, 10, 26)
 
 # Make Plot: Pre SGMA
-plot(basins_gwe, "gwe_pre_mean",
+plot(basins_int, "gwe_pre_mean",
      col=gwe_col, breaks=gwe_breaks, colNA="grey",
      main="Annual Trend in GWE Elevation\nPre SGMA",
      cex.main=master_cex,
@@ -680,7 +602,7 @@ plot(basins_gwe, "gwe_pre_mean",
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Post SGMA
-plot(basins_gwe, "gwe_post_mean",
+plot(basins_int, "gwe_post_mean",
      col=gwe_col, breaks=gwe_breaks, colNA="grey",
      main="Annual Trend in GWE Elevation\nPost SGMA",
      cex.main=master_cex,
@@ -688,7 +610,7 @@ plot(basins_gwe, "gwe_post_mean",
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Change pre vs post SGMA
-plot(basins_gwe, "gwe_delta_mean",
+plot(basins_int, "gwe_delta_mean",
      col=delta_col(9), breaks=gwe_breaks, colNA="grey",
      main="Change in Annual Trend in GWE\nPre vs Post SGMA",
      cex.main=master_cex,
@@ -713,7 +635,7 @@ no3_col = colorRampPalette(c("chocolate", "white", "green3"))
 no3_breaks = c(-.3, -.2, -.12, -.05, .05, .12, .2, .3)
 
 # Make Plot: Pre SGMA
-plot(basins_ddw, "no3_pre",
+plot(basins_int, "no3_pre",
      col=no3_col(7), breaks=no3_breaks, colNA="grey",
      main="Annual Trend in NO3 Concentration\nPre SGMA",
      cex.main=master_cex,
@@ -721,7 +643,7 @@ plot(basins_ddw, "no3_pre",
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Post SGMA
-plot(basins_ddw, "no3_post",
+plot(basins_int, "no3_post",
      col=no3_col(7), breaks=no3_breaks, colNA="grey",
      main="Annual Trend in NO3 Concentration\nPost SGMA",
      cex.main=master_cex,
@@ -729,7 +651,7 @@ plot(basins_ddw, "no3_post",
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Change pre vs post SGMA
-plot(basins_ddw, "no3_d",
+plot(basins_int, "no3_d",
      col=delta_col(7), breaks=no3_breaks, colNA="grey",
      main="Change in Annual Trend in NO3 Conc.\nPre vs Post SGMA",
      cex.main=master_cex,
@@ -742,34 +664,34 @@ dev.off() # Close file
 ```{r, 6.2.2}
 # 6.2.2 - Plot Chromium Results
 dev.new()
-png(file="data/my_figures/CR_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+png(file="data/my_figures/cr6_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
 
 # Initialize new plot
 par(mfrow=c(1,3)) # Set arrangement of subplots
 
 # Set symbology/breaks
-cr_col = colorRampPalette(c("chocolate", "#FFCF94", "white", "#91FCFF", "cyan"))
-cr_breaks = c(-.4, -.3, -.2, -.1, .1, .2, .3, .4)
+cr6_col = colorRampPalette(c("chocolate", "#FFCF94", "white", "#91FCFF", "cyan"))
+cr6_breaks = c(-.4, -.3, -.2, -.1, .1, .2, .3, .4)
 
 # Make Plot: Pre SGMA
-plot(basins_ddw, "cr_pre",
-     col=cr_col(7), breaks=cr_breaks, colNA="grey",
+plot(basins_int, "cr6_pre",
+     col=cr6_col(7), breaks=cr6_breaks, colNA="grey",
      main="Annual Trend in Cr6 Concentration\nPre SGMA",
      cex.main=master_cex,
      plg=list(x="bottomleft", title="dCr6 Conc.\n(mg/L/year)", cex=master_cex))
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Post SGMA
-plot(basins_ddw, "cr_post",
-     col=cr_col(7), breaks=cr_breaks, colNA="grey",
+plot(basins_int, "cr6_post",
+     col=cr6_col(7), breaks=cr6_breaks, colNA="grey",
      main="Annual Trend in Cr6 Concentration\nPost SGMA",
      cex.main=master_cex,
      plg=list(x="bottomleft", title="dCr6 Conc.\n(mg/L/year)", cex=master_cex))
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Change pre vs post SGMA
-plot(basins_ddw, "cr_d",
-     col=delta_col(7), breaks=cr_breaks, colNA="grey",
+plot(basins_int, "cr6_d",
+     col=delta_col(7), breaks=cr6_breaks, colNA="grey",
      main="Change in Annual Trend in Cr6 Conc.\nPre vs Post SGMA",
      cex.main=master_cex,
      plg=list(x="bottomleft", title="Change in\ndCr6 Conc.\n(mg/L/year)", cex=master_cex))
@@ -792,7 +714,7 @@ delta_as_col = colorRampPalette(c("#FF5D3D", "#FF9985", "white", "#3DDBFF"))
 as_breaks = c(-3.5, -2.5, -1.5, -.5, -.1, .1, .5, 1.5)
 
 # Make Plot: Pre SGMA
-plot(basins_ddw, "as_pre",
+plot(basins_int, "as_pre",
      col=as_col(7), breaks=as_breaks, colNA="grey",
      main="Annual Trend in As Concentration\nPre SGMA",
      cex.main=master_cex,
@@ -800,7 +722,7 @@ plot(basins_ddw, "as_pre",
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Post SGMA
-plot(basins_ddw, "as_post",
+plot(basins_int, "as_post",
      col=as_col(7), breaks=as_breaks, colNA="grey",
      main="Annual Trend in As Concentration\nPost SGMA",
      cex.main=master_cex,
@@ -808,7 +730,7 @@ plot(basins_ddw, "as_post",
 terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
 
 # Add Plot: Change pre vs post SGMA
-plot(basins_ddw, "as_d",
+plot(basins_int, "as_d",
      col=delta_as_col(7), breaks=as_breaks, colNA="grey",
      main="Change in Annual Trend in As Conc.\nPre vs Post SGMA",
      cex.main=master_cex,
