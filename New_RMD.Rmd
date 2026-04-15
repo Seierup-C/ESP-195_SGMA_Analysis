@@ -1,0 +1,833 @@
+---
+title: "ESP_106_Project_Emma_Christian"
+author: "Christian Seierup"
+date: "2026-02-11"
+output: html_document
+indent: true
+---
+
+```{r setup, include=FALSE}
+# Sets the default chunk to have "echo=FALSE"
+# knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(fig.align = "center", warning = FALSE, message = FALSE)
+```
+
+```{r Load Libraries, include=FALSE}
+# Add all libraries here.
+# library(readxl)
+# library(DT)
+library(terra)
+library(tidyr)
+library(dplyr)
+library(fields) # For TPS interpolation
+library(gstat) # For IDW Interpolation
+```
+
+
+## 1. Load Data
+
+```{r 1. Load Data, eval=FALSE}
+# 1.1 - GSPMD - GSP Monitoring Data
+gwe_data_raw = read.csv("raw/gspmd/groundwater_level_data.csv")
+gwe_sites_raw = read.csv("raw/gspmd/groundwater_level_sites.csv") 
+
+# 1.2 - GAMA Data
+gama_sites_raw = read.csv("raw/gama/gama_allwells.csv")
+ddw_2000_09_raw = read.csv("raw/ddw/ddw2000-2009.csv") # DDW samping data from 2000-2009
+ddw_2010_19_raw = read.csv("raw/ddw/ddw2010-2019.csv")
+ddw_2020_pres_raw = read.csv("raw/ddw/ddw2020-present.csv")
+
+# 1.3 - Save Raw Data
+save(gwe_data_raw, ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw,
+     file="data/my_Rdata/raw_data.Rdata")
+
+save(gwe_sites_raw, gama_sites_raw,
+     file="data/my_Rdata/raw_sites.Rdata")
+```
+
+## 2. Clean Data
+### 2.1 GSPMD Data Cleaning
+```{r, eval=FALSE}
+load("data/my_Rdata/raw_data.Rdata")
+load("data/my_Rdata/raw_sites.Rdata")
+```
+
+```{r, 2.1.1 Clean GSPMD Sites Data, eval=FALSE}
+# 2.1.1 - GSPMD Sites
+# GPSMD Groundwater Level Sample Sites
+gwe_sites = gwe_sites_raw %>% 
+  
+  # Add Basin and Subbasin Information
+  mutate(
+    SUBBASIN_NUMBER = sapply(strsplit(BASIN_NAME,split=" ") , "[", 1), # unique subbasin number
+    BASIN_NUMBER = substr(BASIN_NAME, 1, 5) # unique basin number
+  ) %>% 
+  
+  # Select basins and Cols of interest
+  select(SITE_CODE, SUBBASIN_NUMBER, BASIN_NUMBER, LATITUDE,
+         LONGITUDE, WELL_DEPTH, LAST_GSE, SMC_MT) %>% # Columns of interest
+  subset(BASIN_NUMBER %in% c("5-006", "5-021", "5-022")) %>%  # Only central valley basins
+  
+  # Tibble Format
+  as_tibble()
+```
+
+```{r 2.1.2 Clean GSPMD Data, eval=FALSE}
+# 2.1.2 - GSPMD Data
+# GPSMD Groundwater Level Sample Data
+gwe_data = gwe_data_raw %>%
+  
+  # Select Basins and Cols of interest
+  subset(SITE_CODE %in% gwe_sites$SITE_CODE) %>%   # Only central valley wells
+  select(SITE_CODE, MSMT_DATE, GWE) %>%  # Columns of interest
+  
+  # Tibble Format
+  as_tibble()
+
+# Add a post_SGMA column
+gwe_data$post_SGMA = "Pre_SGMA"
+gwe_data$post_SGMA[gwe_data$MSMT_DATE > "2014-01-01"] = "Post_SGMA"
+```
+
+
+### 2.2 GAMA/DDW Data Cleaning
+
+```{r, 2.2.1 Clean GAMA Sites, eval=FALSE}
+# 2.2.1 - GAMA Wells
+# GAMA location information for all wells
+gama_sites = gama_sites_raw %>% 
+  
+  # Add Basin and Subbasin Information
+  mutate(
+    SUBBASIN_NUMBER = stringr::str_extract(gm_gis_dwr_basin, "(?<=\\().*(?=\\))"),
+    BASIN_NUMBER = substr(SUBBASIN_NUMBER, 1, 5) # "BASIN_NUMBER" contains the unique basin number
+  ) %>% 
+  
+  # Select basins and Cols of interest
+  subset(select=c("gm_well_id", "gm_latitude", "gm_longitude", "SUBBASIN_NUMBER", "BASIN_NUMBER")) %>% # Columns of interest
+  subset(BASIN_NUMBER %in% c("5-006", "5-021", "5-022")) %>%  # Only central valley basins
+  
+  # Tibble Format
+  as_tibble()
+```
+
+```{r, 2.2.2 Clean DDW Data, eval=FALSE}
+# 2.2.2 - DDW Samples
+# Columns and contaminants of interest
+ddw_cols = c("gm_well_id", "gm_samp_collection_date", "gm_result", "gm_chemical_name", "gm_chemical_units")
+ddw_contaminants = c("Arsenic", "Chromium, Hexavalent (Cr6)", "Nitrate as N")
+
+# Combine ddw datasets
+ddw = rbind(ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw) %>% 
+  
+  # Subset
+  subset(gm_chemical_name %in% ddw_contaminants & # Contaminants of interest
+         gm_well_id %in% gama_sites$gm_well_id, # Wells of interest
+         select=ddw_cols) %>% # Columns of interest
+  
+  # Add Chemical Information
+  mutate(
+    gm_samp_collection_date = as.Date(gm_samp_collection_date), # Change Data type
+    chemical = paste(gm_chemical_name, gm_chemical_units, sep="_") %>% 
+      gsub(" ", "_", .) # Change all spaces to _ in chemical col
+  ) %>% select(gm_well_id, gm_samp_collection_date, gm_result, chemical) %>% # Trim cols
+  
+  # Tibble Format
+  as_tibble()
+
+# Add a post_SGMA column
+ddw$post_SGMA = "Pre_SGMA"
+ddw$post_SGMA[ddw$gm_samp_collection_date > "2014-01-01"] = "Post_SGMA"
+```
+
+```{r, 2.3 Save Clean Data, eval=FALSE}
+# 2.3 Save Data
+save(gwe_data, ddw,
+     file="data/my_Rdata/clean_data.Rdata")
+
+save(gwe_sites, gama_sites,
+     file="data/my_Rdata/clean_sites.Rdata")
+```
+
+## 3. Run Regression on Data
+For each dataset, we want to determine the rate of change in each measured attribute (Groundwater Depletion, Pollutant Accumulation), at each well both before and after the implementation of SGMA to determine how SGMA affected these rates of change. 
+
+### 3.1 GSPMD Regression Analysis
+We will begin our analysis of the Groundwater Elevation data by dropping all NA
+values, subsetting for only GWE measurements taken January 2000 and onwards,
+and keeping only the relevant columns. We'll then group the measurements by 
+whether they were taken Pre or Post SGMA, and by each unique well, and run a
+simple linear regression on each group (this yields estimates of GWE change in
+ft/day). We'll multiply each calculated slope by 365 to put it in units of
+ft/year. 
+
+```{r}
+load("data/my_Rdata/clean_data.Rdata")
+load("data/my_Rdata/clean_sites.Rdata")
+```
+
+```{r, 3.1.1 Subset GWE Data}
+# 3.1.1 - Subset GWEData
+gwe_data = gwe_data %>% 
+  
+  # Drop NA values
+  drop_na(GWE) %>% 
+  
+  # Set date as a Date Data type
+  mutate(
+    MSMT_DATE = as.Date(MSMT_DATE)
+  ) %>% 
+  
+  # Remove outlier well
+  subset(
+    MSMT_DATE >= "2000-01-01" & SITE_CODE != "357898N1192302W001", # Outlier
+    select=c("SITE_CODE", "MSMT_DATE", "GWE", "post_SGMA")
+  ) %>% 
+  as_tibble()
+
+# Result: gwe_data - a tibble of each GWE measurement
+# 
+# # A tibble: 243,342 × 4
+#   SITE_CODE          MSMT_DATE    GWE post_SGMA
+#   <chr>              <date>     <dbl> <chr>    
+# 1 394559N1220854W001 2011-10-11  79.6 Pre_SGMA 
+# 2 390174N1214630W003 2008-06-07  31.0 Pre_SGMA 
+# 3 390284N1215155W001 2011-10-22  40.1 Pre_SGMA 
+# 4 390174N1214630W002 2011-10-04  45.7 Pre_SGMA 
+# 5 363500N1197800W003 2011-10-28 209.  Pre_SGMA 
+# # ℹ 243,337 more rows
+```
+
+```{r, 3.1.2 GWE Regression}
+# 3.1.2 - Run Regression, Select only slopes, trim columns
+gwe_reg = gwe_data %>% 
+  
+  # Group by individual wells, and Before/After SGMA
+  group_by(SITE_CODE, post_SGMA) %>% 
+  
+  # Run Regression for each group
+  group_modify(~broom::tidy(lm(GWE ~ MSMT_DATE, data = .x)))%>% 
+  
+  # Select only the significant slopes
+  subset(term=="MSMT_DATE" & p.value < .05) %>% 
+  
+  # Put slopes in units of change/year
+  mutate(
+    slope = estimate*365
+  ) %>% 
+  
+  # Select only desired columns
+  select(SITE_CODE, post_SGMA, slope) %>% 
+  drop_na(slope)
+
+# RESULT: gwe_reg - a tibble of pre/post SGMA rate of change in 
+#                   groundwater elevation
+# 
+# # A tibble: 1,618 × 4
+# # Groups:   SITE_CODE, post_SGMA [1,618]
+#   SITE_CODE          post_SGMA   slope           p
+#   <chr>              <chr>       <dbl>       <dbl>
+# 1 349662N1189211W001 Post_SGMA -13.5   0.00485    
+# 2 349836N1189228W001 Post_SGMA  -1.89  0.00335    
+# 3 349976N1188463W001 Post_SGMA  -3.09  0.00000884 
+# 4 350019N1188149W001 Post_SGMA   0.687 0.000000729
+# 5 350033N1189366W001 Post_SGMA  -5.93  0.0313     
+# # ℹ 1,613 more rows
+```
+
+```{r, 3.1.3 GWE Merge}
+# Combine slopes with geodata
+gwe_gdf = merge(gwe_reg, gwe_sites, by="SITE_CODE") %>% 
+  
+  # Change name of lat long 
+  mutate(x = LONGITUDE, y = LATITUDE) %>% 
+  
+  # Select only desired columns
+  select(SITE_CODE, post_SGMA, slope, x, y) %>% 
+  as_tibble()
+
+# RESULT: gwe_gdf - tibble of gwe_reg slopes with x and y coordinates attached
+# 
+# # A tibble: 1,618 × 6
+#   SITE_CODE          post_SGMA   slope           p     x     y
+#   <chr>              <chr>       <dbl>       <dbl> <dbl> <dbl>
+# 1 349662N1189211W001 Post_SGMA -13.5   0.00485     -119.  35.0
+# 2 349836N1189228W001 Post_SGMA  -1.89  0.00335     -119.  35.0
+# 3 349976N1188463W001 Post_SGMA  -3.09  0.00000884  -119.  35.0
+# 4 350019N1188149W001 Post_SGMA   0.687 0.000000729 -119.  35.0
+# 5 350033N1189366W001 Post_SGMA  -5.93  0.0313      -119.  35.0
+# # ℹ 1,613 more rows
+```
+
+### 3.2 DDW/GAMA Regression Analysis
+We will now analyze the Division of Drinking water (DDW) and Groundwater
+Ambient Monitoring and Assessment (GAMA) contaminant data. The analysis will be
+nearly identical to our GSPMD analysis (3.1): we will drop all NA values, 
+subsetting for only measurements taken January 2000 and onwards, and keeping
+only the relevant columns. We'll then group the measurements by 
+whether they were taken Pre or Post SGMA, and by each unique well, and run a
+simple linear regression on each group (this yields estimates of GWE change in
+ft/day). We'll multiply each calculated slope by 365 to put it in units of
+ft/year. 
+
+```{r, 3.2.1 Subset DDW data}
+# 3.2.1 - Intro Subsetting
+ddw_data = ddw %>% 
+  
+  # Drop NA Values
+  drop_na(gm_result) %>% 
+  
+  # Set date as a Date Data type
+  mutate(
+    gm_date = as.Date(gm_samp_collection_date)
+  ) %>% 
+  
+  # Select only desired columns
+  subset(
+    select=c("gm_well_id", 'gm_date', 'gm_result', 'chemical', "post_SGMA"),
+    gm_samp_collection_date > "2000-01-01"
+  ) %>% 
+  as_tibble()
+
+# Result: ddw_data - a tibble of each contaminant measurement
+# 
+# # A tibble: 1,047,850 × 5
+#   gm_well_id        gm_date    gm_result chemical          post_SGMA
+#   <chr>             <date>         <dbl> <chr>             <chr>    
+# 1 CA0104010_003_003 2009-07-21       0.2 Nitrate_as_N_MG/L Pre_SGMA 
+# 2 CA0110001_010_010 2008-07-23       1.3 Nitrate_as_N_MG/L Pre_SGMA 
+# 3 CA0110001_019_019 2009-07-15       1.6 Nitrate_as_N_MG/L Pre_SGMA 
+# 4 CA0110001_047_047 2008-07-16       1.5 Nitrate_as_N_MG/L Pre_SGMA 
+# 5 CA0110003_014_014 2009-06-23       6.8 Nitrate_as_N_MG/L Pre_SGMA 
+# # ℹ 1,047,845 more rows
+```
+
+```{r, 3.2.2 DDW Regression}
+# 3.2.2 - Run Regression, Select only slopes, trim columns
+ddw_reg = ddw_data %>% 
+  
+  # Group by individual wells, pre/post SGMA, and contaminant
+  group_by(gm_well_id, post_SGMA, chemical) %>%
+  
+  # Run Regression for each group
+  group_modify(~broom::tidy(lm(gm_result ~ gm_date, data = .x))) %>% 
+  
+  # Select only significant slopes
+  subset(term=="gm_date" & p.value < .05) %>% 
+  
+  # Put slopes in units of change/year
+  mutate(
+    slope = estimate*365 #In units of x/year
+  ) %>% 
+  
+  # Select only desired columns
+  select(gm_well_id, post_SGMA, chemical, slope) %>% 
+  drop_na(slope)
+
+# RESULT: ddw_reg - a tibble of pre/post SGMA rate of change in 
+#                   contaminant concentration
+# 
+# # A tibble: 5,008 × 5
+# # Groups:   gm_well_id, post_SGMA, chemical [5,008]
+#   gm_well_id        post_SGMA chemical            slope          p
+#   <chr>             <chr>     <chr>               <dbl>      <dbl>
+# 1 CA0105002_001_001 Post_SGMA Nitrate_as_N_MG/L -0.130  0.0327    
+# 2 CA0105002_001_001 Pre_SGMA  Nitrate_as_N_MG/L -0.0916 0.00577   
+# 3 CA0105016_001_001 Post_SGMA Nitrate_as_N_MG/L -0.0952 0.00000234
+# 4 CA0300062_001_001 Pre_SGMA  Nitrate_as_N_MG/L -0.132  0.0489    
+# 5 CA0300524_001_001 Post_SGMA Arsenic_UG/L      29.0    0.0328    
+# # ℹ 5,003 more rows
+```
+
+```{r, 3.2.3 Merge DDW}
+# Combine slopes with geodata
+ddw_gdf = merge(ddw_reg, gama_sites, by="gm_well_id") %>% 
+  
+  # Change name of lat long
+  mutate(x = gm_longitude, y = gm_latitude) %>% 
+  
+  # Select only desired Columns
+  select(gm_well_id, post_SGMA, chemical, slope, x, y) %>% 
+  as_tibble()
+
+# RESULT: ddw_gdf - tibble of ddw_reg slopes with x and y coordinates attached
+# 
+# # A tibble: 4,739 × 7
+#   gm_well_id        post_SGMA chemical             slope       p     x     y
+#   <chr>             <chr>     <chr>                <dbl>   <dbl> <dbl> <dbl>
+# 1 CA0105002_001_001 Post_SGMA Nitrate_as_N_MG/L -0.130   0.0327  -122.  37.8
+# 2 CA0105002_001_001 Pre_SGMA  Nitrate_as_N_MG/L -0.0916  0.00577 -122.  37.8
+# 3 CA0300062_001_001 Pre_SGMA  Nitrate_as_N_MG/L -0.132   0.0489  -121.  38.5
+# 4 CA0300524_001_001 Post_SGMA Arsenic_UG/L      29.0     0.0328  -121.  38.3
+# 5 CA0310008_002_002 Post_SGMA Nitrate_as_N_MG/L -0.00678 0.0160  -121.  38.2
+# # ℹ 4,734 more rows
+```
+
+```{r, 3.3 Save Regression Geodataframes}
+# 3.3 - Save Geodataframes
+save(gwe_gdf, ddw_gdf,
+     file="data/my_Rdata/gdfs.Rdata")
+```
+
+
+## 4. Interpolation (TPS and IDW)
+
+```{r}
+load("data/my_Rdata/gdfs.Rdata")
+# load("data/my_Rdata/clean_sites.Rdata")
+```
+
+### 4.0 Define functions, load Shapefiles
+
+```{r, 4.0.1 TPS Function}
+# 4.0 - Define TPS function
+MyTPS = function(GDF, COL, SHP, GSD){
+
+# This function takes in a dataframe with columns 'x', 'y', and a 
+# column of values to perform a Thin Plate Spline (TPS) regression.
+# It also takes in a shapefile to get the bounds and CRS. It returns
+# A raster of interpolated values with the bounds and CRS of the
+# shapefile.
+# 
+# Inputs: 
+#   GDF: dataframe with columns 'x' and 'y' for coordinates
+#   COL: string of column name in GDF that contains the values
+#           that we want to interpolate for
+#   SHP: SpatVector that sets the bounds for the interpolated raster
+#   GSD: integer of desired Ground Sample Distance in units of the
+#         SHP crs, probably Meters.
+#   
+# Output:
+#   my_tps: SpatRaster of TPS interpolated values with the 
+#           same CRS of SHP
+#   
+# Dependent Packages
+#   fields: for the Tps function
+#   terra: for the interpolate function
+
+  
+  # Project Shapefile
+  SHP = SHP %>% 
+    project("EPSG:3310") # NAD83 CA Teale Albers
+  
+  # Get Projected GDF Coordinates
+  my_coords = as.matrix(GDF[,c("x", "y")]) %>%
+    project("EPSG:4326", "EPSG:3310")
+  
+  # Create my_vals object of measurements
+  my_vals = GDF[COL]
+  
+  
+  # Create Blank Raster to fill in
+  my_rast = rast(ext(SHP) + 10000, crs = crs(SHP),
+                 res=c(GSD, GSD)) # Ground Sample Distance
+                                  # (GSD) in CRS units
+   
+  # Create Tps Object
+  # Tps() takes in a matrix of xy values and a vector of independent values
+  my_tps_mod = Tps(x = my_coords,
+                   Y = my_vals)
+
+  # Interpolate using Tps Object
+  my_tps = interpolate(my_rast, my_tps_mod)
+
+  # Clip Interpolated rasters to basins area
+  my_tps = crop(my_tps, SHP, mask=T)
+
+  # Return clipped raster
+  my_tps
+}
+```
+
+```{r, 4.0.2 IDW Function}
+# 4.0 - Define IDW function
+MyIDW = function(GDF, COL, SHP, GSD){
+
+# This function takes in a dataframe with columns 'x', 'y', and a 
+# column of values to perform a Inverse Distance Weighting (IDW) 
+# regression. It also takes in a shapefile to get the bounds and
+# CRS. It returns a raster of interpolated values with the bounds
+# and CRS of the shapefile.
+# 
+# Inputs: 
+#   GDF: dataframe with columns 'x' and 'y' for coordinates
+#   COL: string of column name in GDF that contains the values
+#           that we want to interpolate for
+#   SHP: SpatVector that sets the bounds for the interpolated raster
+#   GSD: integer of desired Ground Sample Distance in units of the
+#         SHP crs, probably Meters.
+#   
+# Output:
+#   my_idw: SpatRaster of IDW interpolated values with the 
+#           same CRS of SHP
+#   
+# Dependent Packages
+#   gstat: for the gstat function, doing IDW interpolation
+#   terra: for the interpolate function
+  
+  # Project Shapefile
+  SHP = SHP %>% 
+    project("EPSG:3310") # NAD83 CA Teale Albers
+  
+  # Get Projected GDF Coordinates
+  my_coords = as.matrix(GDF[,c("x", "y")]) %>%
+    project("EPSG:4326", "EPSG:3310")
+
+  # Add Projected coords back to GDF
+  GDF$x = my_coords[,1]
+  GDF$y = my_coords[,2]
+  
+  # Rename Column (Redundant if COL == slope)
+  colnames(GDF)[colnames(GDF) == COL] = "slope"
+
+  # Create Blank Raster to fill in
+  my_rast = rast(ext(SHP) + 10000, crs = crs(SHP),
+                 res=c(GSD, GSD)) # Ground Sample Distance
+                                  # (GSD) in CRS units
+  
+  # Create gstat object w/ projected coordinates
+  my_idw_gstat = gstat(id="slope_idw", formula=slope~1, locations=~x+y,
+                            data=GDF, nmax=12, set=list(idp=2))
+  
+  # Run Interpolations
+  my_idw = interpolate(my_rast, my_idw_gstat, debug.level=0, index=1)
+  
+  # Clip Interpolated rasters to basins area
+  my_idw = crop(my_idw, SHP, mask=T)
+
+  # Return IDW
+  my_idw
+}
+```
+
+```{r, 4.0.3 Open Shapefiles}
+# 4.0.3 - Open Shapefiles
+# Basins - Seperate
+basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>% 
+  
+  # Only Central Valley Basins
+  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022"))
+
+# Combined Basins + State Boundary (mostly for plotting insets)
+ca_basins = rbind(
+  vect("data/my_shapes/ca_state/CA_state.shp"), # First polygon is CA State Boundary
+  aggregate(basins, dissolve=T) # Entire CV basin
+)
+
+# Project Basins to the CRS of the well locations
+basins = project(basins, "epsg:4326")
+ca_basins = project(ca_basins, "epsg:4326") 
+```
+
+### 4.1 TPS for GWE
+
+```{r, 4.1}
+# 4.1.1 - Run TPS interpolation
+# Pre SGMA TPS for GWE
+gwe_pre_tps = MyTPS(GDF = gwe_gdf %>% 
+                      subset(post_SGMA == "Pre_SGMA"),
+                    COL = "slope",
+                    SHP = ca_basins[2],
+                    GSD = 2000)
+
+# Post SGMA TPS for GWE
+gwe_post_tps = MyTPS(GDF = gwe_gdf %>% 
+                       subset(post_SGMA == "Post_SGMA"),
+                     COL = "slope",
+                     SHP = ca_basins[2],
+                     GSD = 2000)
+
+```
+
+```{r, 4.1}
+# 4.1.1 - Run TPS interpolation
+# Pre SGMA TPS for GWE
+gwe_pre_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Pre_SGMA"),
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+
+# Post SGMA TPS for GWE
+gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+
+```
+
+### 4.2 IDW for DDW
+
+```{r, 4.2.1}
+# 4.2.1 - Run IDW for Nitrate
+# Pre SGMA IDW for NO3
+no3_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" & 
+                                                chemical == "Nitrate_as_N_MG/L"),
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+
+# Post SGMA IDW for NO3
+no3_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
+                                                chemical == "Nitrate_as_N_MG/L"),
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+```
+
+```{r, 4.2.2}
+# 4.2.2 - Run IDW for Hexavalent Chromium
+# Pre SGMA IDW for Cr6
+cr_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
+                                               chemical == "Chromium,_Hexavalent_(Cr6)_UG/L"),
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+
+# Post SGMA IDW for Cr6
+cr_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
+                                                chemical == "Chromium,_Hexavalent_(Cr6)_UG/L"),
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+```
+
+```{r, 4.2.3}
+# 4.2.3 - Run IDW for Arsenic
+# Pre SGMA IDW for As
+as_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
+                                              chemical == "Arsenic_UG/L"),
+                    COL = "slope", SHP = ca_basins[2], GSD = 2000)
+
+# Post SGMA IDW for As
+as_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
+                                               chemical == "Arsenic_UG/L"),
+                     COL = "slope", SHP = ca_basins[2], GSD = 2000)
+```
+
+
+
+
+## 5. Zonal Statistics on Interpolations
+
+```{r}
+load("data/my_Rdata/gdfs.Rdata")
+load("data/my_Rdata/clean_sites.Rdata")
+```
+
+### 5.1 Zonal Stats on GWE Data
+
+```{r}
+# Reproject Basins
+basins_gwe = project(basins, "EPSG:3310")
+
+# Run Zonal Stats
+gwe_pre_mean = zonal(gwe_pre_idw, basins_gwe, fun="mean")
+
+gwe_post_mean = zonal(gwe_post_idw, basins_gwe, fun="mean")
+
+# Add Zonal Stats to Dataframe
+values(basins_gwe) = cbind(values(basins_gwe),
+                           gwe_pre = gwe_pre_mean$slope_idw.pred,
+                           gwe_post = gwe_post_mean$slope_idw.pred)
+
+# Calculate Change in slope
+basins_gwe$gwe_d = basins_gwe$gwe_pre - basins_gwe$gwe_post
+```
+
+### 5.2 Zonal Stats on DDW Data
+
+```{r}
+# Reproject Basins
+basins_ddw = project(basins, "EPSG:3310")
+
+# Nitrate Zonal Stats
+no3_pre_mean = zonal(no3_pre_idw, basins_ddw, fun="mean")
+no3_post_mean = zonal(no3_post_idw, basins_ddw, fun="mean")
+
+# Chromium Zonal Stats
+cr_pre_mean = zonal(cr_pre_idw, basins_ddw, fun="mean")
+cr_post_mean = zonal(cr_post_idw, basins_ddw, fun="mean")
+
+# Arsenic Zonal Stats
+as_pre_mean = zonal(as_pre_idw, basins_ddw, fun="mean")
+as_post_mean = zonal(as_post_idw, basins_ddw, fun="mean")
+
+values(basins_ddw) = cbind(values(basins_ddw),
+                           no3_pre = no3_pre_mean$slope_idw.pred,
+                           no3_post = no3_post_mean$slope_idw.pred,
+                           cr_pre = cr_pre_mean$slope_idw.pred,
+                           cr_post = cr_post_mean$slope_idw.pred,
+                           as_pre = as_pre_mean$slope_idw.pred,
+                           as_post = as_post_mean$slope_idw.pred)
+
+# Calculate change in slope
+basins_ddw$no3_d = basins_ddw$no3_post - basins_ddw$no3_pre
+basins_ddw$cr_d = basins_ddw$cr_post - basins_ddw$cr_pre
+basins_ddw$as_d = basins_ddw$as_post - basins_ddw$as_pre
+```
+
+
+## 6. Plot Data
+
+```{r}
+# GWE
+dev.new()
+png(file="data/my_figures/GWE_interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+
+# Initialize new plot
+par(mfrow=c(1,3)) # Set arrangement of subplots
+master_cex = 4 # For setting title and legend scale
+
+# Set symbology/breaks
+delta_col = colorRampPalette(c("#FF5D3D", "white", "#3DDBFF"))
+gwe_col <- c('red', "#FF7070", "#FF8282", "#FFD9D9", 'white', "#B3DBFF", "#69B8FF", "#006FFF", "blue")  # create color ramp from red to blue
+gwe_breaks = c(-20, -10, -5, -2, -.1, .1, 2, 5, 10, 26)
+
+# Make Plot: Pre SGMA
+plot(basins_gwe, "gwe_pre_mean",
+     col=gwe_col, breaks=gwe_breaks, colNA="grey",
+     main="Annual Trend in GWE Elevation\nPre SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dGWE\n(ft/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Post SGMA
+plot(basins_gwe, "gwe_post_mean",
+     col=gwe_col, breaks=gwe_breaks, colNA="grey",
+     main="Annual Trend in GWE Elevation\nPost SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dGWE\n(ft/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Change pre vs post SGMA
+plot(basins_gwe, "gwe_delta_mean",
+     col=delta_col(9), breaks=gwe_breaks, colNA="grey",
+     main="Change in Annual Trend in GWE\nPre vs Post SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="Change in dGWE\n(ft/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+dev.off() # Close file
+```
+
+```{r, 6.2.1}
+# Nitrate
+dev.new()
+png(file="data/my_figures/NO3_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+
+# Initialize new plot
+par(mfrow=c(1,3)) # Set arrangement of subplots
+master_cex = 4 # For setting title and legend scale
+
+# Set symbology/breaks
+delta_col = colorRampPalette(c("#FF5D3D", "white", "#3DDBFF"))
+no3_col = colorRampPalette(c("chocolate", "white", "green3"))
+no3_breaks = c(-.3, -.2, -.12, -.05, .05, .12, .2, .3)
+
+# Make Plot: Pre SGMA
+plot(basins_ddw, "no3_pre",
+     col=no3_col(7), breaks=no3_breaks, colNA="grey",
+     main="Annual Trend in NO3 Concentration\nPre SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dNO3 Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Post SGMA
+plot(basins_ddw, "no3_post",
+     col=no3_col(7), breaks=no3_breaks, colNA="grey",
+     main="Annual Trend in NO3 Concentration\nPost SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dNO3 Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Change pre vs post SGMA
+plot(basins_ddw, "no3_d",
+     col=delta_col(7), breaks=no3_breaks, colNA="grey",
+     main="Change in Annual Trend in NO3 Conc.\nPre vs Post SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="Change in\ndNO3 Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+dev.off() # Close file
+```
+
+```{r, 6.2.2}
+# 6.2.2 - Plot Chromium Results
+dev.new()
+png(file="data/my_figures/CR_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+
+# Initialize new plot
+par(mfrow=c(1,3)) # Set arrangement of subplots
+
+# Set symbology/breaks
+cr_col = colorRampPalette(c("chocolate", "#FFCF94", "white", "#91FCFF", "cyan"))
+cr_breaks = c(-.4, -.3, -.2, -.1, .1, .2, .3, .4)
+
+# Make Plot: Pre SGMA
+plot(basins_ddw, "cr_pre",
+     col=cr_col(7), breaks=cr_breaks, colNA="grey",
+     main="Annual Trend in Cr6 Concentration\nPre SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dCr6 Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Post SGMA
+plot(basins_ddw, "cr_post",
+     col=cr_col(7), breaks=cr_breaks, colNA="grey",
+     main="Annual Trend in Cr6 Concentration\nPost SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dCr6 Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Change pre vs post SGMA
+plot(basins_ddw, "cr_d",
+     col=delta_col(7), breaks=cr_breaks, colNA="grey",
+     main="Change in Annual Trend in Cr6 Conc.\nPre vs Post SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="Change in\ndCr6 Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+dev.off() # Close file
+```
+
+```{r, 6.2.3}
+# 6.2.3 - Plot Arsenic Results
+dev.new()
+png(file="data/my_figures/AS_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+
+# Initialize new plot
+par(mfrow=c(1,3)) # Set arrangement of subplots
+
+# Set symbology/breaks
+as_col = colorRampPalette(c("chocolate", "#FFCF94", "white", "#C04FFF"))
+delta_as_col = colorRampPalette(c("#FF5D3D", "#FF9985", "white", "#3DDBFF"))
+as_breaks = c(-3.5, -2.5, -1.5, -.5, -.1, .1, .5, 1.5)
+
+# Make Plot: Pre SGMA
+plot(basins_ddw, "as_pre",
+     col=as_col(7), breaks=as_breaks, colNA="grey",
+     main="Annual Trend in As Concentration\nPre SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dAs Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Post SGMA
+plot(basins_ddw, "as_post",
+     col=as_col(7), breaks=as_breaks, colNA="grey",
+     main="Annual Trend in As Concentration\nPost SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="dAs Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+# Add Plot: Change pre vs post SGMA
+plot(basins_ddw, "as_d",
+     col=delta_as_col(7), breaks=as_breaks, colNA="grey",
+     main="Change in Annual Trend in As Conc.\nPre vs Post SGMA",
+     cex.main=master_cex,
+     plg=list(x="bottomleft", title="Change in\ndAs Conc.\n(mg/L/year)", cex=master_cex))
+terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+
+dev.off() # Close file
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
