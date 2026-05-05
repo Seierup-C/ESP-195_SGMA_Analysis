@@ -382,18 +382,16 @@ load("data/my_Rdata/gdfs.Rdata")
 
 ```{r, 4.0.2 IDW Function}
 # 4.0 - Define IDW function
-MyIDW = function(GDF, COL, SHP, GSD, NAME){
+MyIDW = function(GDF, SHP, GSD, NAME){
 
 # This function takes in a dataframe with columns 'x', 'y', and a 
-# column of values to perform a Inverse Distance Weighting (IDW) 
+# column of values ("slope") to perform a Inverse Distance Weighting (IDW) 
 # regression. It also takes in a shapefile to get the bounds and
 # CRS. It returns a raster of interpolated values with the bounds
 # and CRS of the shapefile.
 # 
 # Inputs: 
 #   GDF: dataframe with columns 'x' and 'y' for coordinates
-#   COL: string of column name in GDF that contains the values
-#           that we want to interpolate for
 #   SHP: SpatVector that sets the bounds for the interpolated raster
 #   GSD: integer of desired Ground Sample Distance in units of the
 #         SHP crs, probably Meters.
@@ -415,9 +413,6 @@ MyIDW = function(GDF, COL, SHP, GSD, NAME){
   # Add Projected coords back to GDF
   GDF$x = my_coords[,1]
   GDF$y = my_coords[,2]
-  
-  # Rename Column (Redundant if COL == slope)
-  colnames(GDF)[colnames(GDF) == COL] = "slope"
 
   # Create Blank Raster to fill in
   my_rast = rast(ext(SHP) + 10000, crs = crs(SHP),
@@ -453,7 +448,7 @@ basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>%
 # Combined Basins + State Boundary (mostly for plotting insets)
 ca_basins = rbind(
   vect("data/my_shapes/ca_state/CA_state.shp"), # First polygon is CA State Boundary
-  aggregate(basins, dissolve=T) # Entire CV basin
+  aggregate(basins, dissolve=T) # Second polygon is the Entire CV basin
 )
 
 # Project Basins to the CRS of the well locations
@@ -467,11 +462,11 @@ ca_basins = project(ca_basins, "epsg:4326")
 # 4.1.1 - Run TPS interpolation
 # Pre SGMA TPS for GWE
 gwe_pre_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Pre_SGMA"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "gwe_pre_ft_yr")
+                    SHP = ca_basins[2], GSD = 2000, NAME = "gwe_pre_ft_yr")
 
 # Post SGMA TPS for GWE
 gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post_ft_yr")
+                     SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post_ft_yr")
 ```
 
 ### 4.2 IDW for DDW
@@ -481,12 +476,12 @@ gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
 # Pre SGMA IDW for NO3
 no3_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" & 
                                                 chemical == "Nitrate_as_N_MG/L"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "no3_pre_mg_L_yr")
+                    SHP = ca_basins[2], GSD = 2000, NAME = "no3_pre_mg_L_yr")
 
 # Post SGMA IDW for NO3
 no3_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                 chemical == "Nitrate_as_N_MG/L"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "no3_post_mg_L_yr")
+                     SHP = ca_basins[2], GSD = 2000, NAME = "no3_post_mg_L_yr")
 ```
 
 ```{r, 4.2.2}
@@ -494,12 +489,12 @@ no3_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
 # Pre SGMA IDW for Cr6
 cr6_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
                                                chemical == "Chromium,_Hexavalent_(Cr6)_UG/L"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "cr6_pre_ug_L_yr")
+                    SHP = ca_basins[2], GSD = 2000, NAME = "cr6_pre_ug_L_yr")
 
 # Post SGMA IDW for Cr6
 cr6_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                 chemical == "Chromium,_Hexavalent_(Cr6)_UG/L"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "cr6_post_ug_L_yr")
+                     SHP = ca_basins[2], GSD = 2000, NAME = "cr6_post_ug_L_yr")
 ```
 
 ```{r, 4.2.3}
@@ -507,15 +502,81 @@ cr6_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
 # Pre SGMA IDW for As
 as_pre_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Pre_SGMA" &
                                               chemical == "Arsenic_UG/L"),
-                    COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "as_pre_ug_L_yr")
+                    SHP = ca_basins[2], GSD = 2000, NAME = "as_pre_ug_L_yr")
 
 # Post SGMA IDW for As
 as_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                chemical == "Arsenic_UG/L"),
-                     COL = "slope", SHP = ca_basins[2], GSD = 2000, NAME = "as_post_ug_L_yr")
+                     SHP = ca_basins[2], GSD = 2000, NAME = "as_post_ug_L_yr")
 ```
 
 
+### 4.3 CV for GWE Data
+
+Cross validation (CV) will be the same for all data. I'll create a function that automatically does the following:
+
+Assign a group number (1-5) to all observation points
+
+Loop through and create training and testing datasets (1 is testing, 2-5 are training)
+
+Run the IDW with the training dataset
+
+Retrieve the raster values at each point in the testing data
+
+Calculate RMSE for that group
+
+Repeat with a different group
+
+```{r}
+MyShuffleSplitCV = function(GDF, N){
+
+  
+# Set Seed/RMSE
+  set.seed(101)
+  my_errors = vector() # Blank vector to fill in later
+  
+# Assign a group number (1-5) to all observation points
+  GDF$group = sample(rep(1:N, length.out=nrow(GDF)))
+
+# Loop through and create training and testing datasets (1 is testing, 2-5 are training)
+  for(test_group in 1:N){
+    
+  # Divide Training and Testing datasets
+    train_groups = c(1:N)[-test_group]
+  
+    train = GDF %>% subset(group %in% train_groups)
+    test = GDF %>% subset(group == test_group)
+    
+  # Run the IDW with the training dataset
+    train_idw = MyIDW(GDF = GDF %>% subset(post_SGMA == "Pre_SGMA"),
+                      SHP = ca_basins[2], GSD = 2000, NAME = "int_vals")
+  
+  # Retrieve the raster values at each point in the testing data
+    
+    # test SpatVector
+    test_sv = vect(test, geom=c('x','y'), crs="EPSG:4326") %>% 
+      project("EPSG:3310")
+    
+    # Values
+    test = cbind(test, terra::extract(train_idw, test_sv)[2]) %>% as_tibble()
+    
+  
+  # Calculate RMSE for that group
+    errors = Metrics::mae(test$slope, test$int_vals)
+    
+  # Add RMSE to vector of RMSEs
+    my_errors = my_erros %>% append(errors)
+  }
+  
+  
+# Return Average MAE
+  return(mean(my_errors))
+}
+```
+
+```{r}
+jim = MyShuffleSplitCV(gwe_gdf, 10)
+```
 
 
 ## 5. Zonal Statistics on Interpolations
