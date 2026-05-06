@@ -375,7 +375,7 @@ save(gwe_gdf, ddw_gdf,
 
 ```{r}
 load("data/my_Rdata/gdfs.Rdata")
-# load("data/my_Rdata/clean_sites.Rdata")
+load("data/my_Rdata/clean_sites.Rdata")
 ```
 
 ### 4.0 Define functions, load Shapefiles
