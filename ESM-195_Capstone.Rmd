@@ -21,6 +21,9 @@ library(tidyr)
 library(dplyr)
 # library(fields) # For TPS interpolation
 library(gstat) # For IDW Interpolation
+
+library(tidyterra) # For Raster Visualization
+library(basemaps) # For Raster Visualization
 ```
 
 
@@ -469,6 +472,7 @@ gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
                      SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post_ft_yr")
 ```
 
+
 ### 4.2 IDW for DDW
 
 ```{r, 4.2.1}
@@ -509,6 +513,8 @@ as_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
                                                chemical == "Arsenic_UG/L"),
                      SHP = ca_basins[2], GSD = 2000, NAME = "as_post_ug_L_yr")
 ```
+
+
 
 
 ### 4.3 CV for GWE Data
@@ -586,9 +592,9 @@ jim = MyShuffleSplitCV(gwe_gdf, 10)
 # load("data/my_Rdata/clean_sites.Rdata")
 ```
 
-### 5.1 Master Zonal Stats
+### 5.1 Combine rasters
 
-```{r, 5.1 Zonal Stats}
+```{r, 5.1 Combine rasters}
 # Reproject Basins
 basins_zs = project(basins, "EPSG:3310")
 
@@ -598,13 +604,23 @@ sgma_idw = rast(list(gwe_pre_idw, gwe_post_idw,
                      cr6_pre_idw, cr6_post_idw,
                      as_pre_idw, as_post_idw))
 
-# Run Zonal Stats
-sgma_zs = zonal(sgma_idw, basins_zs, fun="mean") %>%
-  as_tibble() %>% 
+# Calculate delta layers
+sgma_idw = sgma_idw %>% 
   mutate(gwe_d_ft_yr = gwe_post_ft_yr - gwe_pre_ft_yr,
          no3_d_mg_L_yr = no3_post_mg_L_yr - no3_pre_mg_L_yr,
          cr6_d_ug_L_yr = cr6_post_ug_L_yr - cr6_pre_ug_L_yr,
          as_d_ug_L_yr = as_post_ug_L_yr - as_pre_ug_L_yr)
+```
+
+### 5.2 Run Zonal Stats
+
+```{r, 5.2 Zonal Stats}
+# Run Zonal Stats
+sgma_zs_mean = zonal(sgma_idw, basins_zs, fun=c("mean")) %>%
+  as_tibble() %>% rename_with(~ paste(., "_mean", sep="")) # rename columns
+
+sgma_zs_sd = zonal(sgma_idw, basins_zs, fun=c("sd")) %>%
+  as_tibble() %>% rename_with(~ paste(., "_sd", sep="")) # rename columns
 
 # Add values back to Shapefile
 values(basins_zs) = values(basins_zs) %>% 
@@ -613,183 +629,279 @@ values(basins_zs) = values(basins_zs) %>%
   select(OBJECTID, Basin_Numb, Basin_Subb, Basin_Name, Basin_Su_1, Region_Off, Area_Acres) %>% 
   
   # Add Zonal Stats
-  cbind(sgma_zs)
+  cbind(sgma_zs_mean, sgma_zs_sd) %>% 
+  
+  # Add Subbasin Name
+  mutate(
+    subb_name = gsub(".*- ","",.$Basin_Su_1)
+  )
 ```
 
-```{r, 5.2 Save Results}
+### 5.3 Add Significance values for Mean/SD
+
+```{r}
+# Tibble for plotting
+zs_df = values(basins_zs) %>% as_tibble()
+
+MySig = function(MEAN, SD){
+  # Quick function for determining whether or not a given mean and SD is significant
+  # ie. when the mean+-sd does not contain 0
+  
+  result = case_when(
+    MEAN+SD > 0 & MEAN-SD > 0 ~ "Positive",
+    MEAN+SD > 0 & MEAN-SD < 0 ~ "None",
+    MEAN+SD < 0 & MEAN-SD < 0 ~ "Negative"
+  ) %>% factor(levels = c("Negative", "None", "Positive"))
+  
+  result # return
+}
+
+# Add significance for GWE and contaminants
+zs_df = zs_df %>% 
+  mutate(
+    gwe_d_sig = MySig(gwe_d_ft_yr_mean, gwe_d_ft_yr_sd),
+    no3_d_sig = MySig(no3_d_mg_L_yr_mean, no3_d_mg_L_yr_sd),
+    cr6_d_sig = MySig(cr6_d_ug_L_yr_mean, cr6_d_ug_L_yr_sd),
+    as_d_sig = MySig(as_d_ug_L_yr_mean, as_d_ug_L_yr_sd)
+  )
+```
+
+```{r, 5.2.1 Save Results}
 # Save Zonal Stats File
-write.csv(values(basins_zs), file="data/my_results/basins_zs.csv")
+save(zs_df, file="data/my_Rdata/zs_df.Rdata")
 writeVector(basins_zs, file="data/my_results/basins_zs.gpkg", overwrite=T)
 writeRaster(sgma_idw, file="data/my_results/sgma_idw.tiff", overwrite=T)
 ```
 
 
+
+
 ## 6. Plot Data
 
 ```{r}
-# GWE
-dev.new()
-png(file="data/my_figures/GWE_interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+# Open Zonal Stats Files
+load("data/my_Rdata/zs_df.Rdata")
+basins_zs = vect("data/my_results/basins_zs.gpkg")
+sgma_idw = rast("data/my_results/sgma_idw.tiff")
 
-# Initialize new plot
-par(mfrow=c(1,3)) # Set arrangement of subplots
-master_cex = 4 # For setting title and legend scale
+# 4.0.3 - Open Shapefiles
+# Basins - Seperate
+basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>% 
+  
+  # Only Central Valley Basins
+  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022"))
 
-# Set symbology/breaks
-delta_col = colorRampPalette(c("#FF5D3D", "white", "#3DDBFF"))
-gwe_col <- c('red', "#FF7070", "#FF8282", "#FFD9D9", 'white', "#B3DBFF", "#69B8FF", "#006FFF", "blue")  # create color ramp from red to blue
-gwe_breaks = c(-20, -10, -5, -2, -.1, .1, 2, 5, 10, 26)
+# Combined Basins + State Boundary (mostly for plotting insets)
+ca_basins = rbind(
+  vect("data/my_shapes/ca_state/CA_state.shp"), # First polygon is CA State Boundary
+  aggregate(basins, dissolve=T) # Second polygon is the Entire CV basin
+)
 
-# Make Plot: Pre SGMA
-plot(basins_zs, "gwe_pre_ft_yr",
-     col=gwe_col, breaks=gwe_breaks, colNA="grey",
-     main="Annual Trend in GWE Elevation\nPre SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dGWE\n(ft/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-# Add Plot: Post SGMA
-plot(basins_zs, "gwe_post_ft_yr",
-     col=gwe_col, breaks=gwe_breaks, colNA="grey",
-     main="Annual Trend in GWE Elevation\nPost SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dGWE\n(ft/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-# Add Plot: Change pre vs post SGMA
-plot(basins_zs, "gwe_d_ft_yr",
-     col=delta_col(9), breaks=gwe_breaks, colNA="grey",
-     main="Change in Annual Trend in GWE\nPre vs Post SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="Change in dGWE\n(ft/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-dev.off() # Close file
+# Project Basins to the CRS of the well locations
+basins = project(basins, "epsg:4326")
+ca_basins = project(ca_basins, "epsg:4326") 
 ```
 
-```{r, 6.2.1}
-# Nitrate
-dev.new()
-png(file="data/my_figures/NO3_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+### 6.0 Setup Plotting
 
-# Initialize new plot
-par(mfrow=c(1,3)) # Set arrangement of subplots
-master_cex = 4 # For setting title and legend scale
+### 6.1 Plot GWE ZS Results
+```{r, 6.1 Plot GWE ZS Results}
+# Plot Zonal Stats for GWE =========
+# ==================================
 
-# Set symbology/breaks
-delta_col = colorRampPalette(c("#FF5D3D", "white", "#3DDBFF"))
-no3_col = colorRampPalette(c("chocolate", "white", "green3"))
-no3_breaks = c(-.4, -.25, -.1, -.02, .02, .1, .25, .4)
+# Order table by significance and mean
+gwe_df = zs_df %>% arrange(gwe_d_sig, gwe_d_ft_yr_mean) %>%
+  select(
+    Basin_Subb, subb_name, gwe_d_sig, gwe_d_ft_yr_mean, gwe_d_ft_yr_sd
+  ) %>% 
+  mutate(
+    subb = factor(subb_name, levels=subb_name)
+  )
 
-# Make Plot: Pre SGMA
-plot(basins_zs, "no3_pre_mg_L_yr",
-     col=no3_col(7), breaks=no3_breaks, colNA="grey",
-     main="Annual Trend in NO3 Concentration\nPre SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dNO3 Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-# Add Plot: Post SGMA
-plot(basins_zs, "no3_post_mg_L_yr",
-     col=no3_col(7), breaks=no3_breaks, colNA="grey",
-     main="Annual Trend in NO3 Concentration\nPost SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dNO3 Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-# Add Plot: Change pre vs post SGMA
-plot(basins_zs, "no3_d_mg_L_yr",
-     col=delta_col(7), breaks=no3_breaks, colNA="grey",
-     main="Change in Annual Trend in NO3 Conc.\nPre vs Post SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="Change in\ndNO3 Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-dev.off() # Close file
+# Plot Results
+gwe_zs_plot = ggplot(gwe_df, aes(x=subb, y = gwe_d_ft_yr_mean, color=gwe_d_sig))+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    panel.grid.mminor = element_blank()
+  )+
+  xlab("Subbasin")+
+  ylab("Before/After SGMA ROC in GWE (feet/year)")+
+  
+  
+  # Rotate X Axis
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  
+  # Add Points
+  geom_point()+
+  
+  # Add Error Bars
+  geom_errorbar(aes(ymin = gwe_d_ft_yr_mean - gwe_d_ft_yr_sd,
+                    ymax = gwe_d_ft_yr_mean + gwe_d_ft_yr_sd))+
+  
+  # Legend
+  scale_color_manual(
+    name = "Significance",
+    values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
+  )
 ```
 
-```{r, 6.2.2}
-# 6.2.2 - Plot Chromium Results
-dev.new()
-png(file="data/my_figures/cr6_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+### 6.2 Plot NO3 ZS Results
+```{r, 6.2 Plot NO3 ZS Results}
+# Plot Zonal Stats for NO3 =========
+# ==================================
 
-# Initialize new plot
-par(mfrow=c(1,3)) # Set arrangement of subplots
+# Order table by significance and mean
+no3_df = zs_df %>% arrange(no3_d_sig, no3_d_mg_L_yr_mean) %>%
+  select(
+    Basin_Subb, subb_name, no3_d_sig, no3_d_mg_L_yr_mean, no3_d_mg_L_yr_sd
+  ) %>% 
+  mutate(
+    subb = factor(subb_name, levels=subb_name)
+  )
 
-# Set symbology/breaks
-cr6_col = colorRampPalette(c("chocolate", "#FFCF94", "white", "#91FCFF", "cyan"))
-# cr6_breaks = c(-.4, -.3, -.2, -.1, .1, .2, .3, .4)
-cr6_breaks = c(-1.2, -.8, -.4, -.1, .1, .4, .8, 1.2)
-
-# Make Plot: Pre SGMA
-plot(basins_zs, "cr6_pre_ug_L_yr",
-     col=cr6_col(7), breaks=cr6_breaks, colNA="grey",
-     main="Annual Trend in Cr6 Concentration\nPre SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dCr6 Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-# Add Plot: Post SGMA
-plot(basins_zs, "cr6_post_ug_L_yr",
-     col=cr6_col(7), breaks=cr6_breaks, colNA="grey",
-     main="Annual Trend in Cr6 Concentration\nPost SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dCr6 Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-# Add Plot: Change pre vs post SGMA
-plot(basins_zs, "cr6_d_ug_L_yr",
-     col=delta_col(7), breaks=cr6_breaks, colNA="grey",
-     main="Change in Annual Trend in Cr6 Conc.\nPre vs Post SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="Change in\ndCr6 Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-dev.off() # Close file
+# Plot Results
+no3_zs_plot = ggplot(no3_df, aes(x=subb, y = no3_d_mg_L_yr_mean, color=no3_d_sig))+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    panel.grid.mminor = element_blank()
+  )+
+  xlab("Subbasin")+
+  ylab("Before/After SGMA ROC in rate (mg/L/yr)")+
+  
+  
+  # Rotate X Axis
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  
+  # Add Points
+  geom_point()+
+  
+  # Add Error Bars
+  geom_errorbar(aes(ymin = no3_d_mg_L_yr_mean - no3_d_mg_L_yr_sd,
+                    ymax = no3_d_mg_L_yr_mean + no3_d_mg_L_yr_sd))+
+  
+  # Legend
+  scale_color_manual(
+    name = "Significance",
+    values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
+  )
 ```
 
-```{r, 6.2.3}
-# 6.2.3 - Plot Arsenic Results
-dev.new()
-png(file="data/my_figures/AS_Interpolation_annual_change.png", width=2000, height=1250) # Initialize Image
+### 6.3 Plot Cr6 ZS Results
+```{r, 6.2 Plot NO3 ZS Results}
+# Plot Zonal Stats for Cr6 =========
+# ==================================
 
-# Initialize new plot
-par(mfrow=c(1,3)) # Set arrangement of subplots
+# Order table by significance and mean
+cr6_df = zs_df %>% arrange(cr6_d_sig, cr6_d_ug_L_yr_mean) %>%
+  select(
+    Basin_Subb, subb_name, cr6_d_sig, cr6_d_ug_L_yr_mean, cr6_d_ug_L_yr_sd
+  ) %>% 
+  mutate(
+    subb = factor(subb_name, levels=subb_name)
+  )
 
-# Set symbology/breaks
-as_col = colorRampPalette(c("chocolate", "#FFCF94", "white", "#C04FFF"))
-delta_as_col = colorRampPalette(c("#FF5D3D", "#FF9985", "white", "#3DDBFF"))
-as_breaks = c(-3.5, -2.5, -1.5, -.5, -.1, .1, .5, 1.5)
+# Plot Results
+cr6_zs_plot = ggplot(cr6_df, aes(x=subb, y = cr6_d_ug_L_yr_mean, color=cr6_d_sig))+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    panel.grid.mminor = element_blank()
+  )+
+  xlab("Subbasin")+
+  ylab("Before/After SGMA ROC in rate (ug/L/yr)")+
+  
+  
+  # Rotate X Axis
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  
+  # Add Points
+  geom_point()+
+  
+  # Add Error Bars
+  geom_errorbar(aes(ymin = cr6_d_ug_L_yr_mean - cr6_d_ug_L_yr_sd,
+                    ymax = cr6_d_ug_L_yr_mean + cr6_d_ug_L_yr_sd))+
+  
+  # Legend
+  scale_color_manual(
+    name = "Significance",
+    values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
+  )
+```
 
-# Make Plot: Pre SGMA
-plot(basins_zs, "as_pre_ug_L_yr",
-     col=as_col(7), breaks=as_breaks, colNA="grey",
-     main="Annual Trend in As Concentration\nPre SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dAs Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+### 6.4 Plot As ZS Results
+```{r, 6.4 Plot As ZS Results}
+# Plot Zonal Stats for As ==========
+# ==================================
 
-# Add Plot: Post SGMA
-plot(basins_zs, "as_post_ug_L_yr",
-     col=as_col(7), breaks=as_breaks, colNA="grey",
-     main="Annual Trend in As Concentration\nPost SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="dAs Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
+# Order table by significance and mean
+as_df = zs_df %>% arrange(as_d_sig, as_d_ug_L_yr_mean) %>%
+  select(
+    Basin_Subb, subb_name, as_d_sig, as_d_ug_L_yr_mean, as_d_ug_L_yr_sd
+  ) %>% 
+  mutate(
+    subb = factor(subb_name, levels=subb_name)
+  )
 
-# Add Plot: Change pre vs post SGMA
-plot(basins_zs, "as_d_ug_L_yr",
-     col=delta_as_col(7), breaks=as_breaks, colNA="grey",
-     main="Change in Annual Trend in As Conc.\nPre vs Post SGMA",
-     cex.main=master_cex,
-     plg=list(x="bottomleft", title="Change in\ndAs Conc.\n(mg/L/year)", cex=master_cex))
-terra::inset(ca_basins, loc="topright", scale=.5, col = c("grey", "white"))
-
-dev.off() # Close file
+# Plot Results
+as_zs_plot = ggplot(as_df, aes(x=subb, y = as_d_ug_L_yr_mean, color=as_d_sig))+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    panel.grid.mminor = element_blank()
+  )+
+  xlab("Subbasin")+
+  ylab("Before/After SGMA ROC in rate (ug/L/yr)")+
+  
+  
+  # Rotate X Axis
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  
+  # Add Points
+  geom_point()+
+  
+  # Add Error Bars
+  geom_errorbar(aes(ymin = as_d_ug_L_yr_mean - as_d_ug_L_yr_sd,
+                    ymax = as_d_ug_L_yr_mean + as_d_ug_L_yr_sd))+
+  
+  # Legend
+  scale_color_manual(
+    name = "Significance",
+    values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
+  )
 ```
 
 
 
+```{r}
+zs_master_plot = plot_grid(gwe_zs_plot, no3_zs_plot, cr6_zs_plot, as_zs_plot,
+                           nrow = 2, ncol = 2, labels = "AUTO")
+
+ggsave(zs_master_plot, filename="jim.png",
+       width = 4000, height = 4000, units = "px")
+```
+
+
+
+
+
+
+
+
+
+
+### Plot GWE Rasters
+```{r}
+p = ggplot()+
+  geom_spatraster(data = sgma_idw[[c(1,2,9)]])+
+  
+  facet_wrap(~lyr, ncol=3)
+```
 
 
 
