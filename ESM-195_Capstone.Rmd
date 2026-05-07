@@ -770,7 +770,7 @@ no3_zs_plot = ggplot(no3_df, aes(x=subb, y = no3_d_mg_L_yr_mean, color=no3_d_sig
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in rate (mg/L/yr)")+
+  ylab("Before/After SGMA ROC in NO3 Contamination (mg/L/yr)")+
   
   
   # Rotate X Axis
@@ -813,7 +813,7 @@ cr6_zs_plot = ggplot(cr6_df, aes(x=subb, y = cr6_d_ug_L_yr_mean, color=cr6_d_sig
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in rate (ug/L/yr)")+
+  ylab("Before/After SGMA ROC in Cr6 Contamination (ug/L/yr)")+
   
   
   # Rotate X Axis
@@ -856,7 +856,7 @@ as_zs_plot = ggplot(as_df, aes(x=subb, y = as_d_ug_L_yr_mean, color=as_d_sig))+
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in rate (ug/L/yr)")+
+  ylab("Before/After SGMA ROC in Arsenic Contamination (ug/L/yr)")+
   
   
   # Rotate X Axis
@@ -897,10 +897,29 @@ ggsave(zs_master_plot, filename="jim.png",
 
 ### Plot GWE Rasters
 ```{r}
-p = ggplot()+
-  geom_spatraster(data = sgma_idw[[c(1,2,9)]])+
+basemap = basemap_raster(sgma_idw, map_service = "esri", map_type = "world_hillshade") %>%
+  rast() %>% project(sgma_idw)
+
+
+ggplot()+
   
-  facet_wrap(~lyr, ncol=3)
+  # Theme Information
+  theme_bw()+
+  
+  # Basemap
+  geom_spatraster_rgb(data = basemap)+
+  
+  # Data
+  geom_spatraster(data = sgma_idw[[c(1,2,9)]])+
+  geom_spatvector(data = basins, fill=NA, alpha=.2)+
+  
+  # Facet Wrap Layers
+  facet_wrap(~lyr, ncol=3)+
+  
+  scale_fill_gradientn(name="ROC in GWE\n(ft/yr)",
+    colors = c("#d11e02", "white", "#09ab03"),
+    breaks = c(-60, 0, 60), na.value=NA
+  )
 ```
 
 
