@@ -90,7 +90,7 @@ gwe_data = gwe_data_raw %>%
 
 # Add a post_SGMA column
 gwe_data$post_SGMA = "Pre_SGMA"
-gwe_data$post_SGMA[gwe_data$MSMT_DATE > "2014-01-01"] = "Post_SGMA"
+gwe_data$post_SGMA[gwe_data$MSMT_DATE >= "2015-01-01"] = "Post_SGMA"
 ```
 
 
@@ -142,7 +142,7 @@ ddw = rbind(ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw) %>%
 
 # Add a post_SGMA column
 ddw$post_SGMA = "Pre_SGMA"
-ddw$post_SGMA[ddw$gm_samp_collection_date > "2014-01-01"] = "Post_SGMA"
+ddw$post_SGMA[ddw$gm_samp_collection_date >= "2015-01-01"] = "Post_SGMA"
 ```
 
 ```{r, 2.3 Save Clean Data, eval=FALSE}
