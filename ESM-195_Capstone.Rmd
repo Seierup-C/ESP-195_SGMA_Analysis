@@ -22,6 +22,7 @@ library(dplyr)
 # library(fields) # For TPS interpolation
 library(gstat) # For IDW Interpolation
 
+library(ggplot2) # For Raster Visualization
 library(tidyterra) # For Raster Visualization
 library(basemaps) # For Raster Visualization
 ```
