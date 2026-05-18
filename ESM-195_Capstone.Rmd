@@ -19,28 +19,36 @@ knitr::opts_chunk$set(fig.align = "center", warning = FALSE, message = FALSE)
 library(terra)
 library(tidyr)
 library(dplyr)
-# library(fields) # For TPS interpolation
 library(gstat) # For IDW Interpolation
-
 library(ggplot2) # For Raster Visualization
 library(tidyterra) # For Raster Visualization
 library(basemaps) # For Raster Visualization
+library(cowplot) # For Raster Visualization
 ```
 
 
 ## 1. Load Data
 
-```{r 1. Load Data, eval=FALSE}
+```{r}
 # 1.1 - GSPMD - GSP Monitoring Data
-gwe_data_raw = read.csv("raw_data/gspmd/groundwater_level_data.csv")
-gwe_sites_raw = read.csv("raw_data/gspmd/groundwater_level_sites.csv") 
+# gwe_data_raw = read.csv("raw_data/gspmd/groundwater_level_data.csv")
+# gwe_sites_raw = read.csv("raw_data/gspmd/groundwater_level_sites.csv")
 
+# 1.1 - PGLM - Periodic Groudnwater Level Measurements (GWE)
+pglm_data = read.csv("data/raw_data/pglm/measurements.csv")
+pglm_sites = read.csv("data/raw_data/pglm/stations.csv")
+```
+
+```{r}
 # 1.2 - GAMA Data
 gama_sites_raw = read.csv("raw_data/gama/gama_allwells.csv")
 ddw_2000_09_raw = read.csv("raw_data/gama/ddw2000-2009.csv") # DDW samping data from 2000-2009
 ddw_2010_19_raw = read.csv("raw_data/gama/ddw2010-2019.csv")
 ddw_2020_pres_raw = read.csv("raw_data/gama/ddw2020-present.csv")
+```
 
+
+```{r 1. Load Data, eval=FALSE}
 # 1.3 - Save Raw Data
 save(gwe_data_raw, ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw,
      file="data/my_Rdata/raw_data.Rdata")
@@ -86,7 +94,10 @@ gwe_data = gwe_data_raw %>%
   select(SITE_CODE, MSMT_DATE, GWE) %>%  # Columns of interest
   
   # Tibble Format
-  as_tibble()
+  as_tibble() %>% 
+  
+  # Only 2004-01-01 and onwards
+  subset(MSMT_DATE >= "2004-01-01")
 
 # Add a post_SGMA column
 gwe_data$post_SGMA = "Pre_SGMA"
@@ -138,7 +149,10 @@ ddw = rbind(ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw) %>%
                gm_result_modifier, gm_reporting_limit) %>% # Trim cols
   
   # Tibble Format
-  as_tibble()
+  as_tibble() %>% 
+  
+  # Only 2004-01-01 and onwards
+  subset(gm_samp_collection_date >= "2004-01-01")
 
 # Add a post_SGMA column
 ddw$post_SGMA = "Pre_SGMA"
@@ -897,33 +911,133 @@ ggsave(zs_master_plot, filename="jim.png",
 
 
 ### Plot GWE Rasters
+
 ```{r}
 basemap = basemap_raster(sgma_idw, map_service = "esri", map_type = "world_hillshade") %>%
   rast() %>% project(sgma_idw)
+```
+
+```{r}
+plot_delta = sgma_idw[[9:12]]
+names(plot_delta) = c("Δ Groundwater Depletion rate (ft/yr)",
+                      "Δ NO3 Contamination Rate (mg/L/yr)",
+                      "Δ Cr6 Contamination Rate (ug/L/yr",
+                      "Δ As Contamination Rate (ug/L/yr)")
 
 
-ggplot()+
+
+# GWE
+gwe_map = ggplot()+
   
   # Theme Information
   theme_bw()+
-  
-  # Basemap
+  theme(
+    legend.position="left"
+  )+
   geom_spatraster_rgb(data = basemap)+
+  facet_wrap(~lyr)+
   
   # Data
-  geom_spatraster(data = sgma_idw[[c(1,2,9)]])+
+  geom_spatraster(data = plot_delta[[1]])+
   geom_spatvector(data = basins, fill=NA, alpha=.2)+
   
   # Facet Wrap Layers
   facet_wrap(~lyr, ncol=3)+
   
-  scale_fill_gradientn(name="ROC in GWE\n(ft/yr)",
+  scale_fill_gradientn(
+    name="",
+    # name="Change in GWE\ndepletion rate\n(ft/yr)",
     colors = c("#d11e02", "white", "#09ab03"),
-    breaks = c(-60, 0, 60), na.value=NA
+    breaks = c(-40, 0, 80), na.value=NA,
+    rescaler = ~ scales::rescale_mid(.x, mid = 0)
   )
+
+
+# NO3
+no3_map = ggplot()+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    legend.position="left"
+  )+
+  geom_spatraster_rgb(data = basemap)+
+  facet_wrap(~lyr)+
+  
+  # Data
+  geom_spatraster(data = plot_delta[[2]])+ # Raster
+  geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
+  
+  scale_fill_gradientn(
+    name="",
+    colors = c("#d11e02", "white", "#09ab03"),
+    breaks = c(-7, 0, 6), na.value=NA,
+    rescaler = ~ scales::rescale_mid(.x, mid = 0)
+  )
+
+# Cr6
+cr6_map = ggplot()+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    legend.position="left"
+  )+
+  geom_spatraster_rgb(data = basemap)+
+  facet_wrap(~lyr)+
+  
+  # Data
+  geom_spatraster(data = plot_delta[[3]])+ # Raster
+  geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
+  
+  scale_fill_gradientn(
+    name="",
+    colors = c("#d11e02", "white", "#09ab03"),
+    breaks = c(-6, 0, 7), na.value=NA,
+    rescaler = ~ scales::rescale_mid(.x, mid = 0)
+  )
+
+as_add = 30
+as = plot_delta[[4]]
+as[as>as_add] = as_add + .1
+as[as< (-as_add)] = -(as_add + .1)
+
+
+# As
+as_map = ggplot()+
+  
+  # Theme Information
+  theme_bw()+
+  theme(
+    legend.position="left"
+  )+
+  geom_spatraster_rgb(data = basemap)+
+  facet_wrap(~lyr)+
+  
+  # Data
+  geom_spatraster(data = as)+ # Raster
+  geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
+  
+  scale_fill_gradientn(
+    name="",
+    colors = c("#d11e02", "white", "#09ab03"),
+    breaks = c(-as_add, 0, as_add), na.value=NA,
+    rescaler = ~ scales::rescale_mid(.x, mid = 0)
+  )
+
 ```
 
 
+```{r}
+# d_master_plot = plot_grid(gwe_map, no3_map, cr6_map, as_map, nrow = 2, ncol = 2, labels = "AUTO")
+
+d_master_plot = (gwe_map | no3_map) / (cr6_map | as_map)+
+  plot_annotation(tag_levels = "A")+
+  theme(plot.tag = element_text(size = 50))
+
+ggsave(d_master_plot, filename="d_master_plot.png",
+       width = 3400, height = 5000, units = "px")
+```
 
 
 
