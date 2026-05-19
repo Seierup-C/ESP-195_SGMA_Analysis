@@ -35,8 +35,8 @@ library(cowplot) # For Raster Visualization
 # gwe_sites_raw = read.csv("raw_data/gspmd/groundwater_level_sites.csv")
 
 # 1.1 - PGLM - Periodic Groudnwater Level Measurements (GWE)
-pglm_data = read.csv("data/raw_data/pglm/measurements.csv")
-pglm_sites = read.csv("data/raw_data/pglm/stations.csv")
+pglm_data_raw = read.csv("data/raw_data/pglm/measurements.csv")
+pglm_sites_raw = read.csv("data/raw_data/pglm/stations.csv")
 ```
 
 ```{r}
@@ -50,38 +50,74 @@ ddw_2020_pres_raw = read.csv("raw_data/gama/ddw2020-present.csv")
 
 ```{r 1. Load Data, eval=FALSE}
 # 1.3 - Save Raw Data
-save(gwe_data_raw, ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw,
-     file="data/my_Rdata/raw_data.Rdata")
+save(ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw, gama_sites_raw,
+     file="data/my_Rdata/raw_gama.Rdata")
 
-save(gwe_sites_raw, gama_sites_raw,
-     file="data/my_Rdata/raw_sites.Rdata")
+save(pglm_data_raw, pglm_sites_raw,
+     file="data/my_Rdata/raw_pglm.Rdata")
 ```
 
 ## 2. Clean Data
-### 2.1 GSPMD Data Cleaning
+### 2.1 PGLM Data Cleaning
 ```{r, eval=FALSE}
 load("data/my_Rdata/raw_data.Rdata")
 load("data/my_Rdata/raw_sites.Rdata")
+load("data/my_Rdata/raw_pglm.Rdata")
 ```
 
-```{r, 2.1.1 Clean GSPMD Sites Data, eval=FALSE}
-# 2.1.1 - GSPMD Sites
-# GPSMD Groundwater Level Sample Sites
-gwe_sites = gwe_sites_raw %>% 
-  
-  # Add Basin and Subbasin Information
-  mutate(
-    SUBBASIN_NUMBER = sapply(strsplit(BASIN_NAME,split=" ") , "[", 1), # unique subbasin number
-    BASIN_NUMBER = substr(BASIN_NAME, 1, 5) # unique basin number
-  ) %>% 
+```{r}
+pglm_sites = pglm_sites_raw %>% 
   
   # Select basins and Cols of interest
-  select(SITE_CODE, SUBBASIN_NUMBER, BASIN_NUMBER, LATITUDE,
-         LONGITUDE, WELL_DEPTH, LAST_GSE, SMC_MT) %>% # Columns of interest
-  subset(BASIN_NUMBER %in% c("5-006", "5-021", "5-022")) %>%  # Only central valley basins
+  select(site_code, basin_code, latitude, longitude,
+         well_depth, gse, well_use) %>% 
+  subset(substr(basin_code, 1, 5) %in% c("5-006", "5-021", "5-022")) %>% 
   
   # Tibble Format
   as_tibble()
+```
+
+```{r}
+pglm_data = pglm_data_raw %>% 
+  
+  # Select Basins and Cols of interest
+  select(site_code, msmt_date, gwe, wlm_gse, wlm_mthd_desc) %>%
+  mutate(msmt_date = as.Date(msmt_date)) %>% 
+  subset(
+    site_code %in% pglm_sites$site_code & msmt_date >= "2004-01-01"
+  ) %>%   # Only central valley wells
+
+  # Tibble Format
+  as_tibble()
+
+pglm_data$post_SGMA = "Pre_SGMA"
+pglm_data$post_SGMA[pglm_data$msmst_date >= "2015-01-01"] = "Post_SGMA"
+```
+
+
+
+
+
+
+
+```{r, 2.1.1 Clean GSPMD Sites Data, eval=FALSE}
+# # 2.1.1 - GSPMD Sites
+# # GPSMD Groundwater Level Sample Sites
+# gwe_sites = gwe_sites_raw %>% 
+#   
+#   # Add Basin and Subbasin Information
+#   mutate(
+#     SUBBASIN_NUMBER = sapply(strsplit(BASIN_NAME,split=" ") , "[", 1), # unique subbasin number
+#     BASIN_NUMBER = substr(BASIN_NAME, 1, 5) # unique basin number
+#   ) %>% 
+#   
+#   # Select basins and Cols of interest
+#   select(SITE_CODE, SUBBASIN_NUMBER, BASIN_NUMBER, LATITUDE,
+#          LONGITUDE, WELL_DEPTH, LAST_GSE, SMC_MT) %>% # Columns of interest
+#   subset(BASIN_NUMBER %in% c("5-006", "5-021", "5-022")) %>%  # Only central valley basins
+#   
+#   # Tibble Format
+#   as_tibble()
 ```
 
 ```{r 2.1.2 Clean GSPMD Data, eval=FALSE}
