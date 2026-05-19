@@ -82,6 +82,7 @@ pglm_data = pglm_data_raw %>%
   
   # Select Basins and Cols of interest
   select(site_code, msmt_date, gwe, wlm_gse, wlm_mthd_desc) %>%
+  na.omit(gwe) %>% 
   mutate(msmt_date = as.Date(msmt_date)) %>% 
   subset(
     site_code %in% pglm_sites$site_code & msmt_date >= "2004-01-01"
@@ -200,6 +201,9 @@ ddw$post_SGMA[ddw$gm_samp_collection_date >= "2015-01-01"] = "Post_SGMA"
 save(gwe_data, ddw,
      file="data/my_Rdata/clean_data.Rdata")
 
+save(pglm_data, pglm_sites,
+     file="data/my_Rdata/clean_pglm.Rdata")
+
 save(gwe_sites, gama_sites,
      file="data/my_Rdata/clean_sites.Rdata")
 ```
@@ -219,6 +223,7 @@ ft/year.
 ```{r}
 load("data/my_Rdata/clean_data.Rdata")
 load("data/my_Rdata/clean_sites.Rdata")
+load("data/my_Rdata/clean_pglm.Rdata")
 ```
 
 ```{r, 3.1.1 Subset GWE Data}
