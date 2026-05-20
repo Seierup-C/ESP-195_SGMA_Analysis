@@ -14,16 +14,19 @@ knitr::opts_chunk$set(fig.align = "center", warning = FALSE, message = FALSE)
 
 ```{r Load Libraries, include=FALSE}
 # Add all libraries here.
-# library(readxl)
-# library(DT)
+
+# For Data Analysis/tibble functionality
 library(terra)
 library(tidyr)
 library(dplyr)
 library(gstat) # For IDW Interpolation
-library(ggplot2) # For Raster Visualization
-library(tidyterra) # For Raster Visualization
-library(basemaps) # For Raster Visualization
-library(cowplot) # For Raster Visualization
+
+# For Raster Visualization/Mapping
+library(ggplot2)
+library(tidyterra)
+library(basemaps)
+library(cowplot)
+library(patchwork)
 ```
 
 
@@ -92,13 +95,8 @@ pglm_data = pglm_data_raw %>%
   as_tibble()
 
 pglm_data$post_SGMA = "Pre_SGMA"
-pglm_data$post_SGMA[pglm_data$msmst_date >= "2015-01-01"] = "Post_SGMA"
+pglm_data$post_SGMA[pglm_data$msmt_date >= "2015-01-01"] = "Post_SGMA"
 ```
-
-
-
-
-
 
 
 ```{r, 2.1.1 Clean GSPMD Sites Data, eval=FALSE}
@@ -208,9 +206,6 @@ save(pglm_data, pglm_sites,
 
 save(gwe_sites, gama_sites, pglm_sites,
      file="data/my_Rdata/clean_sites.Rdata")
-
-save(pglm_sites,
-     file="data/my_Rdata/clean_pglm_sites.Rdata")
 
 # # A tibble: 8 × 3
 #   Var1                                                  Freq      perc
@@ -452,8 +447,6 @@ save(gwe_gdf, ddw_gdf, pglm_gdf,
 
 ```{r}
 load("data/my_Rdata/gdfs.Rdata")
-load("data/my_Rdata/clean_pglm_sites.Rdata")
-load("data/my_Rdata/clean_sites.Rdata")
 ```
 
 ### 4.0 Define functions, load Shapefiles
@@ -519,9 +512,7 @@ MyIDW = function(GDF, SHP, GSD, NAME){
 # 4.0.3 - Open Shapefiles
 # Basins - Seperate
 basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>% 
-  
-  # Only Central Valley Basins
-  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022"))
+  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022")) # Only CV
 
 # Combined Basins + State Boundary (mostly for plotting insets)
 ca_basins = rbind(
@@ -537,16 +528,26 @@ ca_basins = project(ca_basins, "epsg:4326")
 ### 4.1 TPS for GWE
 
 ```{r, 4.1}
-# 4.1.1 - Run TPS interpolation
-# Pre SGMA TPS for GWE
-gwe_pre_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Pre_SGMA"),
-                    SHP = ca_basins[2], GSD = 2000, NAME = "gwe_pre_ft_yr")
-
-# Post SGMA TPS for GWE
-gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
-                     SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post_ft_yr")
+# # 4.1.1 - Run TPS interpolation
+# # Pre SGMA TPS for GWE
+# gwe_pre_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Pre_SGMA"),
+#                     SHP = ca_basins[2], GSD = 2000, NAME = "gwe_pre_ft_yr")
+# 
+# # Post SGMA TPS for GWE
+# gwe_post_idw = MyIDW(GDF = gwe_gdf %>% subset(post_SGMA == "Post_SGMA"),
+#                      SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post_ft_yr")
 ```
 
+```{r}
+# 4.1.1 - Run IDW for PGLM
+# Pre SGMA TPS for pglm
+gwe_pre_idw = MyIDW(GDF = pglm_gdf %>% subset(post_SGMA == "Pre_SGMA"),
+                    SHP = ca_basins[2], GSD = 2000, NAME = "gwe_pre_ft_yr")
+
+# Post SGMA TPS for pglm
+gwe_post_idw = MyIDW(GDF = pglm_gdf %>% subset(post_SGMA == "Post_SGMA"),
+                     SHP = ca_basins[2], GSD = 2000, NAME = "gwe_post_ft_yr")
+```
 
 ### 4.2 IDW for DDW
 
@@ -594,19 +595,7 @@ as_post_idw = MyIDW(GDF = ddw_gdf %>% subset(post_SGMA == "Post_SGMA" &
 
 ### 4.3 CV for GWE Data
 
-Cross validation (CV) will be the same for all data. I'll create a function that automatically does the following:
-
-Assign a group number (1-5) to all observation points
-
-Loop through and create training and testing datasets (1 is testing, 2-5 are training)
-
-Run the IDW with the training dataset
-
-Retrieve the raster values at each point in the testing data
-
-Calculate RMSE for that group
-
-Repeat with a different group
+Cross validation (CV) will be the same for all data.
 
 ```{r}
 MyShuffleSplitCV = function(GDF, N){
@@ -808,6 +797,9 @@ gwe_zs_plot = ggplot(gwe_df, aes(x=subb, y = gwe_d_ft_yr_mean, color=gwe_d_sig))
   # Rotate X Axis
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
   
+  # Add Bold 0 line
+  geom_hline(yintercept = 0, alpha = .6)+
+ 
   # Add Points
   geom_point()+
   
@@ -815,11 +807,12 @@ gwe_zs_plot = ggplot(gwe_df, aes(x=subb, y = gwe_d_ft_yr_mean, color=gwe_d_sig))
   geom_errorbar(aes(ymin = gwe_d_ft_yr_mean - gwe_d_ft_yr_sd,
                     ymax = gwe_d_ft_yr_mean + gwe_d_ft_yr_sd))+
   
-  # Legend
+  # Custom Colors
   scale_color_manual(
     name = "Significance",
     values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
-  )
+  )+
+  guides(color="none") # No Legend
 ```
 
 ### 6.2 Plot NO3 ZS Results
@@ -850,7 +843,10 @@ no3_zs_plot = ggplot(no3_df, aes(x=subb, y = no3_d_mg_L_yr_mean, color=no3_d_sig
   
   # Rotate X Axis
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
-  
+
+   # Add Bold 0 line
+  geom_hline(yintercept = 0, alpha = .6)+
+ 
   # Add Points
   geom_point()+
   
@@ -858,11 +854,12 @@ no3_zs_plot = ggplot(no3_df, aes(x=subb, y = no3_d_mg_L_yr_mean, color=no3_d_sig
   geom_errorbar(aes(ymin = no3_d_mg_L_yr_mean - no3_d_mg_L_yr_sd,
                     ymax = no3_d_mg_L_yr_mean + no3_d_mg_L_yr_sd))+
   
-  # Legend
+  # Custom Colors
   scale_color_manual(
     name = "Significance",
     values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
-  )
+  )+
+  guides(color="none") # No Legend
 ```
 
 ### 6.3 Plot Cr6 ZS Results
@@ -893,7 +890,10 @@ cr6_zs_plot = ggplot(cr6_df, aes(x=subb, y = cr6_d_ug_L_yr_mean, color=cr6_d_sig
   
   # Rotate X Axis
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
-  
+
+   # Add Bold 0 line
+  geom_hline(yintercept = 0, alpha = .6)+
+    
   # Add Points
   geom_point()+
   
@@ -901,11 +901,12 @@ cr6_zs_plot = ggplot(cr6_df, aes(x=subb, y = cr6_d_ug_L_yr_mean, color=cr6_d_sig
   geom_errorbar(aes(ymin = cr6_d_ug_L_yr_mean - cr6_d_ug_L_yr_sd,
                     ymax = cr6_d_ug_L_yr_mean + cr6_d_ug_L_yr_sd))+
   
-  # Legend
+  # Custom Colors
   scale_color_manual(
     name = "Significance",
     values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
-  )
+  )+
+  guides(color="none") # No Legend
 ```
 
 ### 6.4 Plot As ZS Results
@@ -937,6 +938,9 @@ as_zs_plot = ggplot(as_df, aes(x=subb, y = as_d_ug_L_yr_mean, color=as_d_sig))+
   # Rotate X Axis
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
   
+  # Add Bold 0 line
+  geom_hline(yintercept = 0, alpha = .6)+
+  
   # Add Points
   geom_point()+
   
@@ -944,20 +948,26 @@ as_zs_plot = ggplot(as_df, aes(x=subb, y = as_d_ug_L_yr_mean, color=as_d_sig))+
   geom_errorbar(aes(ymin = as_d_ug_L_yr_mean - as_d_ug_L_yr_sd,
                     ymax = as_d_ug_L_yr_mean + as_d_ug_L_yr_sd))+
   
-  # Legend
+  # Custom Colors
   scale_color_manual(
     name = "Significance",
     values = c("Negative" = "#F8766D", "None" = "grey50", "Positive" = "#619CFF")
-  )
+  )+
+  guides(color="none") # No Legend
 ```
 
 
 
 ```{r}
-zs_master_plot = plot_grid(gwe_zs_plot, no3_zs_plot, cr6_zs_plot, as_zs_plot,
-                           nrow = 2, ncol = 2, labels = "AUTO")
+# Export Master plot
+# zs_master_plot = plot_grid(gwe_zs_plot, no3_zs_plot, cr6_zs_plot, as_zs_plot,
+#                            nrow = 2, ncol = 2, labels = "AUTO")
 
-ggsave(zs_master_plot, filename="jim.png",
+zs_master_plot = (gwe_zs_plot | no3_zs_plot) / (cr6_zs_plot | as_zs_plot)+
+  plot_annotation(tag_levels = "A")+
+  theme(plot.tag = element_text(size = 50))
+
+ggsave(zs_master_plot, filename="data/my_figures/figure_2_zs.png",
        width = 4000, height = 4000, units = "px")
 ```
 
@@ -973,7 +983,7 @@ ggsave(zs_master_plot, filename="jim.png",
 ### Plot GWE Rasters
 
 ```{r}
-basemap = basemap_raster(sgma_idw, map_service = "esri", map_type = "world_hillshade") %>%
+bm = basemap_raster(sgma_idw, map_service = "esri", map_type = "world_hillshade") %>%
   rast() %>% project(sgma_idw)
 ```
 
@@ -983,8 +993,12 @@ names(plot_delta) = c("Δ Groundwater Depletion rate (ft/yr)",
                       "Δ NO3 Contamination Rate (mg/L/yr)",
                       "Δ Cr6 Contamination Rate (ug/L/yr",
                       "Δ As Contamination Rate (ug/L/yr)")
-
-
+# Flattening the GWE graph a little
+gwe_max = 120
+gwe_min = -200
+gwe = plot_delta[[1]]
+gwe[gwe>gwe_max] = gwe_max + 1
+gwe[gwe<gwe_min] = gwe_min - 1
 
 # GWE
 gwe_map = ggplot()+
@@ -994,21 +1008,18 @@ gwe_map = ggplot()+
   theme(
     legend.position="left"
   )+
-  geom_spatraster_rgb(data = basemap)+
+  geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
   
   # Data
-  geom_spatraster(data = plot_delta[[1]])+
+  geom_spatraster(data = gwe)+
   geom_spatvector(data = basins, fill=NA, alpha=.2)+
   
-  # Facet Wrap Layers
-  facet_wrap(~lyr, ncol=3)+
-  
   scale_fill_gradientn(
-    name="",
+    name="(ft/yr)",
     # name="Change in GWE\ndepletion rate\n(ft/yr)",
-    colors = c("#d11e02", "white", "#09ab03"),
-    breaks = c(-40, 0, 80), na.value=NA,
+    colors = c("#d11e02", "white", "#008ce3"),
+    breaks = c(gwe_min, 0, gwe_max), na.value=NA,
     rescaler = ~ scales::rescale_mid(.x, mid = 0)
   )
 
@@ -1021,7 +1032,7 @@ no3_map = ggplot()+
   theme(
     legend.position="left"
   )+
-  geom_spatraster_rgb(data = basemap)+
+  geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
   
   # Data
@@ -1029,8 +1040,8 @@ no3_map = ggplot()+
   geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
   
   scale_fill_gradientn(
-    name="",
-    colors = c("#d11e02", "white", "#09ab03"),
+    name="(mg/L/yr)",
+    colors = c("#d11e02", "white", "#008ce3"),
     breaks = c(-7, 0, 6), na.value=NA,
     rescaler = ~ scales::rescale_mid(.x, mid = 0)
   )
@@ -1043,7 +1054,7 @@ cr6_map = ggplot()+
   theme(
     legend.position="left"
   )+
-  geom_spatraster_rgb(data = basemap)+
+  geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
   
   # Data
@@ -1051,17 +1062,17 @@ cr6_map = ggplot()+
   geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
   
   scale_fill_gradientn(
-    name="",
-    colors = c("#d11e02", "white", "#09ab03"),
+    name="(ug/L/yr)",
+    colors = c("#d11e02", "white", "#008ce3"),
     breaks = c(-6, 0, 7), na.value=NA,
     rescaler = ~ scales::rescale_mid(.x, mid = 0)
   )
 
+# Flattening the As graph a little
 as_add = 30
 as = plot_delta[[4]]
 as[as>as_add] = as_add + .1
 as[as< (-as_add)] = -(as_add + .1)
-
 
 # As
 as_map = ggplot()+
@@ -1071,7 +1082,7 @@ as_map = ggplot()+
   theme(
     legend.position="left"
   )+
-  geom_spatraster_rgb(data = basemap)+
+  geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
   
   # Data
@@ -1079,8 +1090,8 @@ as_map = ggplot()+
   geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
   
   scale_fill_gradientn(
-    name="",
-    colors = c("#d11e02", "white", "#09ab03"),
+    name="(ug/L/yr)",
+    colors = c("#d11e02", "white", "#008ce3"),
     breaks = c(-as_add, 0, as_add), na.value=NA,
     rescaler = ~ scales::rescale_mid(.x, mid = 0)
   )
@@ -1095,7 +1106,7 @@ d_master_plot = (gwe_map | no3_map) / (cr6_map | as_map)+
   plot_annotation(tag_levels = "A")+
   theme(plot.tag = element_text(size = 50))
 
-ggsave(d_master_plot, filename="d_master_plot.png",
+ggsave(d_master_plot, filename="data/my_figures/figure_1_rast.png",
        width = 3400, height = 5000, units = "px")
 ```
 
