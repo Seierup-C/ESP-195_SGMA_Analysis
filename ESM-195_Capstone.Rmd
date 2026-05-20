@@ -200,14 +200,29 @@ ddw$post_SGMA[ddw$gm_samp_collection_date >= "2015-01-01"] = "Post_SGMA"
 
 ```{r, 2.3 Save Clean Data, eval=FALSE}
 # 2.3 Save Data
-save(gwe_data, ddw,
+save(gwe_data, ddw, pglm_data,
      file="data/my_Rdata/clean_data.Rdata")
 
 save(pglm_data, pglm_sites,
      file="data/my_Rdata/clean_pglm.Rdata")
 
-save(gwe_sites, gama_sites,
+save(gwe_sites, gama_sites, pglm_sites,
      file="data/my_Rdata/clean_sites.Rdata")
+
+save(pglm_sites,
+     file="data/my_Rdata/clean_pglm_sites.Rdata")
+
+# # A tibble: 8 × 3
+#   Var1                                                  Freq      perc
+#   <fct>                                                <int>     <dbl>
+# 1 ""                                                      29 0.0000104
+# 2 "Acoustic or sonic sounder"                          23797 0.00851  
+# 3 "Airline measurement, pressure gage, or manometer"    1053 0.000376 
+# 4 "Electric sounder measurement"                      172217 0.0616   
+# 5 "Electronic pressure transducer"                   2563596 0.917    
+# 6 "Other"                                               1787 0.000639 
+# 7 "Steel tape measurement"                             34685 0.0124   
+# 8 "Unknown"                                           121689 0.0435   
 ```
 
 ## 3. Run Regression on Data
@@ -228,97 +243,98 @@ load("data/my_Rdata/clean_sites.Rdata")
 load("data/my_Rdata/clean_pglm.Rdata")
 ```
 
-```{r, 3.1.1 Subset GWE Data}
-# 3.1.1 - Subset GWEData
-gwe_data = gwe_data %>% 
-  
-  # Drop NA values
-  drop_na(GWE) %>% 
-  
-  # Set date as a Date Data type
-  mutate(
-    MSMT_DATE = as.Date(MSMT_DATE)
-  ) %>% 
-  
-  # Remove outlier well
-  subset(
-    MSMT_DATE >= "2000-01-01" & SITE_CODE != "357898N1192302W001", # Outlier
-    select=c("SITE_CODE", "MSMT_DATE", "GWE", "post_SGMA")
-  ) %>% 
-  as_tibble()
-
-# Result: gwe_data - a tibble of each GWE measurement
-# 
-# # A tibble: 243,342 × 4
-#   SITE_CODE          MSMT_DATE    GWE post_SGMA
-#   <chr>              <date>     <dbl> <chr>    
-# 1 394559N1220854W001 2011-10-11  79.6 Pre_SGMA 
-# 2 390174N1214630W003 2008-06-07  31.0 Pre_SGMA 
-# 3 390284N1215155W001 2011-10-22  40.1 Pre_SGMA 
-# 4 390174N1214630W002 2011-10-04  45.7 Pre_SGMA 
-# 5 363500N1197800W003 2011-10-28 209.  Pre_SGMA 
-# # ℹ 243,337 more rows
-```
-
-```{r, 3.1.2 GWE Regression}
+```{r}
 # 3.1.2 - Run Regression, Select only slopes, trim columns
-gwe_reg = gwe_data %>% 
+pglm_reg = pglm_data %>% 
   
   # Group by individual wells, and Before/After SGMA
-  group_by(SITE_CODE, post_SGMA) %>% 
+  group_by(site_code, post_SGMA) %>% 
   
   # Run Regression for each group
-  group_modify(~broom::tidy(lm(GWE ~ MSMT_DATE, data = .x)))%>% 
+  group_modify(~broom::tidy(lm(gwe ~ msmt_date, data = .x))) %>% 
   
   # Select only the significant slopes
-  subset(term=="MSMT_DATE" & p.value < .05) %>% 
+  subset(term == "msmt_date" & p.value < .05) %>% 
   
   # Put slopes in units of change/year
-  mutate(
-    slope = estimate*365
-  ) %>% 
+  mutate(slope = estimate*365) %>% 
   
   # Select only desired columns
-  select(SITE_CODE, post_SGMA, slope) %>% 
+  select(site_code, post_SGMA, slope) %>% 
   drop_na(slope)
+```
 
-# RESULT: gwe_reg - a tibble of pre/post SGMA rate of change in 
-#                   groundwater elevation
+```{r}
+pglm_gdf = merge(pglm_reg, pglm_sites, by = "site_code") %>% 
+  
+  # Change name of lat long
+  mutate(x = longitude, y = latitude) %>% 
+  
+  # Select only desired columns
+  select(site_code, post_SGMA, slope, x, y, well_use) %>% 
+  as_tibble()
+```
+
+
+```{r, 3.1.2 GWE Regression}
+# # 3.1.2 - Run Regression, Select only slopes, trim columns
+# gwe_reg = gwe_data %>% 
+#   
+#   # Group by individual wells, and Before/After SGMA
+#   group_by(SITE_CODE, post_SGMA) %>% 
+#   
+#   # Run Regression for each group
+#   group_modify(~broom::tidy(lm(GWE ~ MSMT_DATE, data = .x))) %>% 
+#   
+#   # Select only the significant slopes
+#   subset(term == "MSMT_DATE" & p.value < .05) %>% 
+#   
+#   # Put slopes in units of change/year
+#   mutate(
+#     slope = estimate*365
+#   ) %>% 
+#   
+#   # Select only desired columns
+#   select(SITE_CODE, post_SGMA, slope) %>% 
+#   drop_na(slope)
 # 
-# # A tibble: 1,618 × 4
-# # Groups:   SITE_CODE, post_SGMA [1,618]
-#   SITE_CODE          post_SGMA   slope           p
-#   <chr>              <chr>       <dbl>       <dbl>
-# 1 349662N1189211W001 Post_SGMA -13.5   0.00485    
-# 2 349836N1189228W001 Post_SGMA  -1.89  0.00335    
-# 3 349976N1188463W001 Post_SGMA  -3.09  0.00000884 
-# 4 350019N1188149W001 Post_SGMA   0.687 0.000000729
-# 5 350033N1189366W001 Post_SGMA  -5.93  0.0313     
-# # ℹ 1,613 more rows
+# # RESULT: gwe_reg - a tibble of pre/post SGMA rate of change in 
+# #                   groundwater elevation
+# # 
+# # # A tibble: 1,618 × 4
+# # # Groups:   SITE_CODE, post_SGMA [1,618]
+# #   SITE_CODE          post_SGMA   slope           p
+# #   <chr>              <chr>       <dbl>       <dbl>
+# # 1 349662N1189211W001 Post_SGMA -13.5   0.00485    
+# # 2 349836N1189228W001 Post_SGMA  -1.89  0.00335    
+# # 3 349976N1188463W001 Post_SGMA  -3.09  0.00000884 
+# # 4 350019N1188149W001 Post_SGMA   0.687 0.000000729
+# # 5 350033N1189366W001 Post_SGMA  -5.93  0.0313     
+# # # ℹ 1,613 more rows
 ```
 
 ```{r, 3.1.3 GWE Merge}
-# Combine slopes with geodata
-gwe_gdf = merge(gwe_reg, gwe_sites, by="SITE_CODE") %>% 
-  
-  # Change name of lat long 
-  mutate(x = LONGITUDE, y = LATITUDE) %>% 
-  
-  # Select only desired columns
-  select(SITE_CODE, post_SGMA, slope, x, y) %>% 
-  as_tibble()
-
-# RESULT: gwe_gdf - tibble of gwe_reg slopes with x and y coordinates attached
+# # Combine slopes with geodata
+# gwe_gdf = merge(gwe_reg, gwe_sites, by="SITE_CODE") %>% 
+#   
+#   # Change name of lat long 
+#   mutate(x = LONGITUDE, y = LATITUDE) %>% 
+#   
+#   # Select only desired columns
+#   select(SITE_CODE, post_SGMA, slope, x, y) %>% 
+#   as_tibble()
 # 
-# # A tibble: 1,618 × 6
-#   SITE_CODE          post_SGMA   slope           p     x     y
-#   <chr>              <chr>       <dbl>       <dbl> <dbl> <dbl>
-# 1 349662N1189211W001 Post_SGMA -13.5   0.00485     -119.  35.0
-# 2 349836N1189228W001 Post_SGMA  -1.89  0.00335     -119.  35.0
-# 3 349976N1188463W001 Post_SGMA  -3.09  0.00000884  -119.  35.0
-# 4 350019N1188149W001 Post_SGMA   0.687 0.000000729 -119.  35.0
-# 5 350033N1189366W001 Post_SGMA  -5.93  0.0313      -119.  35.0
-# # ℹ 1,613 more rows
+# # RESULT: gwe_gdf - tibble of gwe_reg slopes with x and y coordinates attached
+# # 
+# # # A tibble: 1,618 × 6
+# #   SITE_CODE          post_SGMA   slope           p     x     y
+# #   <chr>              <chr>       <dbl>       <dbl> <dbl> <dbl>
+# # 1 349662N1189211W001 Post_SGMA -13.5   0.00485     -119.  35.0
+# # 2 349836N1189228W001 Post_SGMA  -1.89  0.00335     -119.  35.0
+# # 3 349976N1188463W001 Post_SGMA  -3.09  0.00000884  -119.  35.0
+# # 4 350019N1188149W001 Post_SGMA   0.687 0.000000729 -119.  35.0
+# # 5 350033N1189366W001 Post_SGMA  -5.93  0.0313      -119.  35.0
+# # # ℹ 1,613 more rows
 ```
 
 ### 3.2 DDW/GAMA Regression Analysis
@@ -427,7 +443,7 @@ ddw_gdf = merge(ddw_reg, gama_sites, by="gm_well_id") %>%
 
 ```{r, 3.3 Save Regression Geodataframes}
 # 3.3 - Save Geodataframes
-save(gwe_gdf, ddw_gdf,
+save(gwe_gdf, ddw_gdf, pglm_gdf,
      file="data/my_Rdata/gdfs.Rdata")
 ```
 
@@ -436,6 +452,7 @@ save(gwe_gdf, ddw_gdf,
 
 ```{r}
 load("data/my_Rdata/gdfs.Rdata")
+load("data/my_Rdata/clean_pglm_sites.Rdata")
 load("data/my_Rdata/clean_sites.Rdata")
 ```
 
