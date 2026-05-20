@@ -122,23 +122,23 @@ pglm_data$post_SGMA[pglm_data$msmst_date >= "2015-01-01"] = "Post_SGMA"
 ```
 
 ```{r 2.1.2 Clean GSPMD Data, eval=FALSE}
-# 2.1.2 - GSPMD Data
-# GPSMD Groundwater Level Sample Data
-gwe_data = gwe_data_raw %>%
-  
-  # Select Basins and Cols of interest
-  subset(SITE_CODE %in% gwe_sites$SITE_CODE) %>%   # Only central valley wells
-  select(SITE_CODE, MSMT_DATE, GWE) %>%  # Columns of interest
-  
-  # Tibble Format
-  as_tibble() %>% 
-  
-  # Only 2004-01-01 and onwards
-  subset(MSMT_DATE >= "2004-01-01")
-
-# Add a post_SGMA column
-gwe_data$post_SGMA = "Pre_SGMA"
-gwe_data$post_SGMA[gwe_data$MSMT_DATE >= "2015-01-01"] = "Post_SGMA"
+# # 2.1.2 - GSPMD Data
+# # GPSMD Groundwater Level Sample Data
+# gwe_data = gwe_data_raw %>%
+#   
+#   # Select Basins and Cols of interest
+#   subset(SITE_CODE %in% gwe_sites$SITE_CODE) %>%   # Only central valley wells
+#   select(SITE_CODE, MSMT_DATE, GWE) %>%  # Columns of interest
+#   
+#   # Tibble Format
+#   as_tibble() %>% 
+#   
+#   # Only 2004-01-01 and onwards
+#   subset(MSMT_DATE >= "2004-01-01")
+# 
+# # Add a post_SGMA column
+# gwe_data$post_SGMA = "Pre_SGMA"
+# gwe_data$post_SGMA[gwe_data$MSMT_DATE >= "2015-01-01"] = "Post_SGMA"
 ```
 
 
@@ -195,6 +195,8 @@ ddw = rbind(ddw_2000_09_raw, ddw_2010_19_raw, ddw_2020_pres_raw) %>%
 ddw$post_SGMA = "Pre_SGMA"
 ddw$post_SGMA[ddw$gm_samp_collection_date >= "2015-01-01"] = "Post_SGMA"
 ```
+
+### 2.3 Save Clean Data
 
 ```{r, 2.3 Save Clean Data, eval=FALSE}
 # 2.3 Save Data
