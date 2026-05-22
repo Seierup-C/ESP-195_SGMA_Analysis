@@ -223,14 +223,7 @@ save(gwe_sites, gama_sites, pglm_sites,
 ## 3. Run Regression on Data
 For each dataset, we want to determine the rate of change in each measured attribute (Groundwater Depletion, Pollutant Accumulation), at each well both before and after the implementation of SGMA to determine how SGMA affected these rates of change. 
 
-### 3.1 GSPMD Regression Analysis
-We will begin our analysis of the Groundwater Elevation data by dropping all NA
-values, subsetting for only GWE measurements taken January 2000 and onwards,
-and keeping only the relevant columns. We'll then group the measurements by 
-whether they were taken Pre or Post SGMA, and by each unique well, and run a
-simple linear regression on each group (this yields estimates of GWE change in
-ft/day). We'll multiply each calculated slope by 365 to put it in units of
-ft/year. 
+### 3.1 PGLM Regression Analysis
 
 ```{r}
 load("data/my_Rdata/clean_data.Rdata")
@@ -742,6 +735,8 @@ writeRaster(sgma_idw, file="data/my_results/sgma_idw.tiff", overwrite=T)
 
 ## 6. Plot Data
 
+### 6.0 Setup Plotting
+
 ```{r}
 # Open Zonal Stats Files
 load("data/my_Rdata/zs_df.Rdata")
@@ -751,9 +746,7 @@ sgma_idw = rast("data/my_results/sgma_idw.tiff")
 # 4.0.3 - Open Shapefiles
 # Basins - Seperate
 basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>% 
-  
-  # Only Central Valley Basins
-  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022"))
+  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022")) # Only CV Basins
 
 # Combined Basins + State Boundary (mostly for plotting insets)
 ca_basins = rbind(
@@ -765,8 +758,6 @@ ca_basins = rbind(
 basins = project(basins, "epsg:4326")
 ca_basins = project(ca_basins, "epsg:4326") 
 ```
-
-### 6.0 Setup Plotting
 
 ### 6.1 Plot GWE ZS Results
 ```{r, 6.1 Plot GWE ZS Results}
@@ -973,14 +964,7 @@ ggsave(zs_master_plot, filename="data/my_figures/figure_2_zs.png",
 
 
 
-
-
-
-
-
-
-
-### Plot GWE Rasters
+### 6.5 Plot GWE Rasters
 
 ```{r}
 bm = basemap_raster(sgma_idw, map_service = "esri", map_type = "world_hillshade") %>%
@@ -993,6 +977,9 @@ names(plot_delta) = c("Δ Groundwater Depletion rate (ft/yr)",
                       "Δ NO3 Contamination Rate (mg/L/yr)",
                       "Δ Cr6 Contamination Rate (ug/L/yr",
                       "Δ As Contamination Rate (ug/L/yr)")
+leg_pos = "bottom"
+
+
 # Flattening the GWE graph a little
 gwe_max = 120
 gwe_min = -200
@@ -1006,7 +993,7 @@ gwe_map = ggplot()+
   # Theme Information
   theme_bw()+
   theme(
-    legend.position="left"
+    legend.position=leg_pos
   )+
   geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
@@ -1030,7 +1017,7 @@ no3_map = ggplot()+
   # Theme Information
   theme_bw()+
   theme(
-    legend.position="left"
+    legend.position=leg_pos
   )+
   geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
@@ -1052,7 +1039,7 @@ cr6_map = ggplot()+
   # Theme Information
   theme_bw()+
   theme(
-    legend.position="left"
+    legend.position=leg_pos
   )+
   geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
@@ -1080,7 +1067,7 @@ as_map = ggplot()+
   # Theme Information
   theme_bw()+
   theme(
-    legend.position="left"
+    legend.position=leg_pos
   )+
   geom_spatraster_rgb(data = bm)+
   facet_wrap(~lyr)+
@@ -1102,17 +1089,134 @@ as_map = ggplot()+
 ```{r}
 # d_master_plot = plot_grid(gwe_map, no3_map, cr6_map, as_map, nrow = 2, ncol = 2, labels = "AUTO")
 
-d_master_plot = (gwe_map | no3_map) / (cr6_map | as_map)+
-  plot_annotation(tag_levels = "A")+
-  theme(plot.tag = element_text(size = 50))
+d_master_plot = (gwe_map | no3_map) / (cr6_map | as_map)&
+  plot_annotation(tag_levels = "A")
 
 ggsave(d_master_plot, filename="data/my_figures/figure_1_rast.png",
-       width = 3400, height = 5000, units = "px")
+       width = 3200, height = 5000, units = "px")
+
+d_master_plot_wide = (gwe_map | no3_map | cr6_map | as_map)&
+  plot_annotation(tag_levels = "A")
+
+ggsave(d_master_plot_wide, filename="data/my_figures/figure_1_rast_wide.png",
+       width = 5000, height = 2500, units = "px")
 ```
 
 
+### 6.6 Plot Explanatary map
 
+```{r}
+load("data/my_Rdata/gdfs.Rdata")
+load("data/my_Rdata/clean_pglm.Rdata")
+```
 
+```{r}
+pglm_test = pglm_data %>%
+  subset(site_code=="365372N1203885W001") %>% 
+  group_by(post_SGMA)
+
+pglm_test_reg = pglm_test %>% 
+  group_modify(~broom::tidy(lm(gwe ~ msmt_date, data = .x)))
+```
+
+```{r}
+# Dataframe for plotting
+lines = data.frame(Date = as.Date(c("2004-01-01", "2014-12-31",
+                                 "2015-01-01", "2025-12-31")))
+lines$Pre = as.numeric(lines$Date) * pglm_test_reg$estimate[4] + pglm_test_reg$estimate[3]
+lines$Post = as.numeric(lines$Date) * pglm_test_reg$estimate[2] + pglm_test_reg$estimate[1]
+```
+
+```{r}
+explain_plot1 = ggplot(pglm_test, aes(msmt_date, gwe))+
+  
+  # Theme Information
+  theme_bw()+
+  xlab("Date (x values in day)")+
+  ylab("Groundwater Elevation (ft above sea level)")+
+  labs(title="Pre vs Post-SGMA trends in Groudnwater Elevation",
+       subtitle = "Site Code: 365372N1203885W001",
+       caption = "Change in trend: .023 - (-.035) = .058 ft/day * 365 days/year = 21.17 ft/year")+
+  
+  # Pre SGMA Segment
+  geom_segment(x = lines$Date[1], y=lines$Pre[1],
+               xend = lines$Date[2], yend=lines$Pre[2],
+               color="#d11e02")+
+  
+  annotate("text", x=as.Date("2009-05-01"), y=60,
+           label= "y = -0.035x + 523.56", color="#d11e02") + 
+
+  # Post SGMA Segment
+  geom_segment(x = lines$Date[3], y=lines$Post[3],
+               xend = lines$Date[4], yend=lines$Post[4],
+               color="#008ce3")+
+  
+  annotate("text", x=as.Date("2021-01-01"), y=-40,
+           label= "y = 0.023x - 441.85", color="#008ce3") + 
+  
+  # Add Line for pre-vs post SGMA
+  geom_vline(xintercept = as.Date("2015-01-01"),
+             color = "forestgreen", linetype="dashed")+
+  
+  annotate("text", x=as.Date("2017-09-01"), y=75,
+           label= "Passing of SGMA", color="forestgreen") + 
+  
+  # Add Points
+  geom_point()
+
+ggsave(explain_plot1, filename="data/my_figures/explain_plot1.png",
+       width = 2000, height = 1300, units = "px")
+```
+
+```{r}
+# 4.0.3 - Open Shapefiles
+# Basins - Seperate
+basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>% 
+  terra::subset(.$Basin_Numb %in% c("5-006", "5-021", "5-022")) # Only CV Basins
+
+# Combined Basins + State Boundary (mostly for plotting insets)
+ca_basins = rbind(
+  vect("data/my_shapes/ca_state/CA_state.shp"), # First polygon is CA State Boundary
+  aggregate(basins, dissolve=T) # Second polygon is the Entire CV basin
+)
+
+# Project Basins to the CRS of the well locations
+basins = project(basins, "epsg:4326")
+ca_basins = project(ca_basins, "epsg:4326") 
+bm = basemap_raster(ca_basins[2], map_service = "esri", map_type = "world_hillshade") %>%
+  rast() %>% project("epsg:4326")
+
+# Pglm Sites trimmed
+pglm = merge(pglm_sites, subset(pglm_gdf, post_SGMA=="Post_SGMA"),
+             all.y=F) %>% vect(geom=c(x="longitude",y="latitude"), crs="epsg:4326")
+
+pglm = pglm_sites %>% 
+  subset(site_code %in% pglm_gdf$site_code) %>% 
+  vect(geom=c(x="longitude",y="latitude"), crs="epsg:4326")
+```
+
+```{r}
+explain_plot2 = ggplot()+
+  
+  # Theme Information
+  theme_bw()+
+  geom_spatraster_rgb(data = bm)+
+  labs(title="GWE Well location and trends")+
+  
+  # Data
+  geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
+  geom_spatvector(data=pglm, aes(fill=slope, size=abs(slope)), color="black", pch=21)+
+  
+  scale_fill_gradientn(
+    name="(ug/L/yr)",
+    colors = c("#d11e02", "white", "#008ce3"),
+    breaks = c(-6, 0, 7), na.value=NA,
+    rescaler = ~ scales::rescale_mid(.x, mid = 0)
+  )
+
+ggsave(explain_plot2, filename="data/my_figures/explain_plot2.png",
+       width = 2000, height = 3200, units = "px")
+```
 
 
 
