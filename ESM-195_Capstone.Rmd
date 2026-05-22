@@ -6,13 +6,13 @@ output: html_document
 indent: true
 ---
 
+## 0. Setup
+
 ```{r setup, include=FALSE}
 # Sets the default chunk to have "echo=FALSE"
 # knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(fig.align = "center", warning = FALSE, message = FALSE)
-```
 
-```{r Load Libraries, include=FALSE}
 # Add all libraries here.
 
 # For Data Analysis/tibble functionality
@@ -28,7 +28,6 @@ library(basemaps)
 library(cowplot)
 library(patchwork)
 ```
-
 
 ## 1. Load Data
 
@@ -750,8 +749,8 @@ basins = vect("data/my_shapes/basins/i08_B118_CA_GroundwaterBasins.shp") %>%
 
 # Combined Basins + State Boundary (mostly for plotting insets)
 ca_basins = rbind(
-  vect("data/my_shapes/ca_state/CA_state.shp"), # First polygon is CA State Boundary
-  aggregate(basins, dissolve=T) # Second polygon is the Entire CV basin
+  vect("data/my_shapes/ca_state/CA_State.shp"), # First polygon is CA State Boundary
+  aggregate(basins, dissolve = T) # Second polygon is the Entire CV basin
 )
 
 # Project Basins to the CRS of the well locations
@@ -782,7 +781,8 @@ gwe_zs_plot = ggplot(gwe_df, aes(x=subb, y = gwe_d_ft_yr_mean, color=gwe_d_sig))
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in GWE (feet/year)")+
+  # ylab("Before/After SGMA ROC in GWE (feet/year)")+
+  ylab("Change in GWE Trend Post-SGMA Δ(feet/year)")+
   
   
   # Rotate X Axis
@@ -829,7 +829,8 @@ no3_zs_plot = ggplot(no3_df, aes(x=subb, y = no3_d_mg_L_yr_mean, color=no3_d_sig
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in NO3 Contamination (mg/L/yr)")+
+  # ylab("Before/After SGMA ROC in NO3 Contamination (mg/L/yr)")+
+  ylab("Change in NO3 Contamination Rate Post-SGMA Δ(mg/L/yr)")+
   
   
   # Rotate X Axis
@@ -876,7 +877,8 @@ cr6_zs_plot = ggplot(cr6_df, aes(x=subb, y = cr6_d_ug_L_yr_mean, color=cr6_d_sig
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in Cr6 Contamination (ug/L/yr)")+
+  # ylab("Before/After SGMA ROC in Cr6 Contamination (ug/L/yr)")+
+  ylab("Change in Cr6 Contamination Rate Post-SGMA Δ(ug/L/yr)")+
   
   
   # Rotate X Axis
@@ -923,7 +925,8 @@ as_zs_plot = ggplot(as_df, aes(x=subb, y = as_d_ug_L_yr_mean, color=as_d_sig))+
     panel.grid.mminor = element_blank()
   )+
   xlab("Subbasin")+
-  ylab("Before/After SGMA ROC in Arsenic Contamination (ug/L/yr)")+
+  # ylab("Before/After SGMA ROC in As Contamination (ug/L/yr)")+
+  ylab("Change in As Contamination Rate Post-SGMA Δ(ug/L/yr)")+
   
   
   # Rotate X Axis
@@ -973,10 +976,10 @@ bm = basemap_raster(sgma_idw, map_service = "esri", map_type = "world_hillshade"
 
 ```{r}
 plot_delta = sgma_idw[[9:12]]
-names(plot_delta) = c("Δ Groundwater Depletion rate (ft/yr)",
-                      "Δ NO3 Contamination Rate (mg/L/yr)",
-                      "Δ Cr6 Contamination Rate (ug/L/yr",
-                      "Δ As Contamination Rate (ug/L/yr)")
+names(plot_delta) = c("Change in Groundwater Depletion rate Δ(ft/yr)",
+                      "Change in NO3 Contamination Rate Δ(mg/L/yr)",
+                      "Change in Cr6 Contamination Rate Δ(ug/L/yr",
+                      "Change in As Contamination Rate Δ(ug/L/yr)")
 leg_pos = "bottom"
 
 
@@ -1205,7 +1208,8 @@ explain_plot2 = ggplot()+
   
   # Data
   geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
-  geom_spatvector(data=pglm, aes(fill=slope, size=abs(slope)), color="black", pch=21)+
+  geom_spatvector(data=pglm, aes(fill=slope, size=abs(slope)),
+                  color="black", pch=21, alpha = .7)+
   
   scale_fill_gradientn(
     name="(ug/L/yr)",
