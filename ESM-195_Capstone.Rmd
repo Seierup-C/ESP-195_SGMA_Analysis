@@ -1186,16 +1186,15 @@ ca_basins = rbind(
 # Project Basins to the CRS of the well locations
 basins = project(basins, "epsg:4326")
 ca_basins = project(ca_basins, "epsg:4326") 
+
+my_crop = ext(c(-120.160040456387, -119.809504253622, 36.0660816819171, 36.3070046594236))
+
 bm = basemap_raster(ca_basins[2], map_service = "esri", map_type = "world_hillshade") %>%
   rast() %>% project("epsg:4326")
 
 # Pglm Sites trimmed
 pglm = merge(pglm_sites, subset(pglm_gdf, post_SGMA=="Post_SGMA"),
              all.y=F) %>% vect(geom=c(x="longitude",y="latitude"), crs="epsg:4326")
-
-pglm = pglm_sites %>% 
-  subset(site_code %in% pglm_gdf$site_code) %>% 
-  vect(geom=c(x="longitude",y="latitude"), crs="epsg:4326")
 ```
 
 ```{r}
@@ -1204,24 +1203,27 @@ explain_plot2 = ggplot()+
   # Theme Information
   theme_bw()+
   geom_spatraster_rgb(data = bm)+
-  labs(title="GWE Well location and trends")+
+  labs(title="GWE Well location and trends",
+       subtitle = "PGLM Dataset")+
   
   # Data
   geom_spatvector(data = basins, fill=NA, alpha=.2)+ # Basin Boundaries
-  geom_spatvector(data=pglm, aes(fill=slope, size=abs(slope)),
-                  color="black", pch=21, alpha = .7)+
+  geom_spatvector(data=pglm, aes(fill=slope, size=abs(slope)), color="black", pch=21, alpha = .6)+
+  
+  scale_size(name="Absolute change\n(ft/year)")+
   
   scale_fill_gradientn(
-    name="(ug/L/yr)",
+    name="Change in GWE\n(ft/yr)",
     colors = c("#d11e02", "white", "#008ce3"),
-    breaks = c(-6, 0, 7), na.value=NA,
+    breaks = c(-145, 0, 180), na.value=NA,
     rescaler = ~ scales::rescale_mid(.x, mid = 0)
   )
 
-ggsave(explain_plot2, filename="data/my_figures/explain_plot2.png",
-       width = 2000, height = 3200, units = "px")
-```
+  
 
+ggsave(explain_plot2, filename="data/my_figures/explain_plot2.png",
+       width = 1900, height = 2700, units = "px")
+```
 
 
 
